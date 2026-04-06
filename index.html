@@ -644,10 +644,13 @@ function renderPurchase(){
     <td style="text-align:right"><strong>${fmt(Number(x.amount)+Number(x.vat))}</strong></td>
     <td style="font-size:11px;color:var(--text2)">${x.payDate||'-'}</td>
     <td style="font-size:11px;color:var(--text2)">${x.note||''}</td>
-    <td><button class="btn sm danger" onclick="deletePurch('${x.id}')">삭제</button></td>
+    <td style="white-space:nowrap">
+      <button class="btn sm" onclick="editPurch('${x.id}')">편집</button>
+      <button class="btn sm danger" onclick="deletePurch('${x.id}')">삭제</button>
+    </td>
   </tr>`).join('');
   document.getElementById('purchaseTable').innerHTML=`<table>
-    <thead><tr><th>프로젝트</th><th>구분</th><th>업체명</th><th style="text-align:right">공급가액</th><th style="text-align:right">부가세</th><th style="text-align:right">합계</th><th>지급예정일</th><th>비고</th><th></th></tr></thead>
+    <thead><tr><th>프로젝트</th><th>구분</th><th>업체명</th><th style="text-align:right">공급가액</th><th style="text-align:right">부가세</th><th style="text-align:right">합계</th><th>지급예정일</th><th>비고</th><th>관리</th></tr></thead>
     <tbody>${rows}</tbody>
   </table>`;
 }
@@ -668,11 +671,14 @@ function renderCost(){
       <td style="text-align:right">${fmt(x.overhead)}</td>
       <td style="text-align:right"><strong>${fmt(total)}</strong></td>
       <td style="font-size:11px;color:var(--text2)">${x.note||''}</td>
-      <td><button class="btn sm danger" onclick="deleteCost('${x.id}')">삭제</button></td>
+      <td style="white-space:nowrap">
+        <button class="btn sm" onclick="editCost('${x.id}')">편집</button>
+        <button class="btn sm danger" onclick="deleteCost('${x.id}')">삭제</button>
+      </td>
     </tr>`;
   }).join('');
   document.getElementById('costTable').innerHTML=`<table>
-    <thead><tr><th>프로젝트</th><th>품목명</th><th style="text-align:right">자재비</th><th style="text-align:right">인건비</th><th style="text-align:right">경비</th><th style="text-align:right">합계원가</th><th>비고</th><th></th></tr></thead>
+    <thead><tr><th>프로젝트</th><th>품목명</th><th style="text-align:right">자재비</th><th style="text-align:right">인건비</th><th style="text-align:right">경비</th><th style="text-align:right">합계원가</th><th>비고</th><th>관리</th></tr></thead>
     <tbody>${rows}</tbody>
   </table>`;
 }
@@ -901,6 +907,107 @@ function savePurch(){
     note:document.getElementById('f_note').value});
   save(K.purch,data);closeModal();renderAll();
 }
+
+// ════════════════════════════════════════════════════════
+//  발주/외주 편집
+// ════════════════════════════════════════════════════════
+function editPurch(id){
+  const data=load(K.purch);
+  const x=data.find(p=>p.id===id);
+  if(!x) return;
+  const projs=load(K.proj);
+  const projOpts=projs.map(p=>`<option value="${p.id}" ${p.id===x.projectId?'selected':''}>${p.id} — ${p.name}</option>`).join('');
+  const html=`<div class="modal">
+    <div class="modal-title">발주 / 외주 편집</div>
+    <div class="form-row"><label>프로젝트</label><select id="f_proj">${projOpts}</select></div>
+    <div class="form-grid">
+      <div class="form-row"><label>구분</label><select id="f_cat">
+        <option ${x.category==='자재구매'?'selected':''}>자재구매</option>
+        <option ${x.category==='외주가공'?'selected':''}>외주가공</option>
+        <option ${x.category==='기타'?'selected':''}>기타</option>
+      </select></div>
+      <div class="form-row"><label>업체명</label><input id="f_vendor" value="${x.vendor||''}"></div>
+    </div>
+    <div class="form-grid">
+      <div class="form-row"><label>공급가액 (원)</label><input id="f_amount" type="number" value="${x.amount||0}" oninput="autoVat()"></div>
+      <div class="form-row"><label>부가세 (원)</label><input id="f_vat" type="number" value="${x.vat||0}"></div>
+    </div>
+    <div class="form-grid">
+      <div class="form-row"><label>지급(예정)일</label><input id="f_pay" type="date" value="${x.payDate||''}"></div>
+      <div class="form-row"><label>비고</label><input id="f_note" value="${x.note||''}"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal()">취소</button>
+      <button class="btn primary" onclick="updatePurch('${id}')">저장</button>
+    </div>
+  </div>`;
+  document.getElementById('modal-area').innerHTML=`<div class="modal-overlay" onclick="ovClose(event)">${html}</div>`;
+}
+
+function updatePurch(id){
+  const vendor=document.getElementById('f_vendor').value.trim();
+  if(!vendor){alert('업체명을 입력하세요.');return;}
+  let data=load(K.purch);
+  data=data.map(x=>x.id===id?{...x,
+    projectId:document.getElementById('f_proj').value,
+    category:document.getElementById('f_cat').value,
+    vendor,
+    amount:Number(document.getElementById('f_amount').value||0),
+    vat:Number(document.getElementById('f_vat').value||0),
+    payDate:document.getElementById('f_pay').value,
+    note:document.getElementById('f_note').value
+  }:x);
+  save(K.purch,data);
+  if(gsUrl){clearTimeout(window._syncDebounce);window._syncDebounce=setTimeout(()=>pushToSheets(),2000);}
+  closeModal();renderAll();
+}
+
+// ════════════════════════════════════════════════════════
+//  제작원가 편집
+// ════════════════════════════════════════════════════════
+function editCost(id){
+  const data=load(K.cost);
+  const x=data.find(p=>p.id===id);
+  if(!x) return;
+  const projs=load(K.proj);
+  const projOpts=projs.map(p=>`<option value="${p.id}" ${p.id===x.projectId?'selected':''}>${p.id} — ${p.name}</option>`).join('');
+  const html=`<div class="modal">
+    <div class="modal-title">제작 원가 편집</div>
+    <div class="form-row"><label>프로젝트</label><select id="f_proj">${projOpts}</select></div>
+    <div class="form-row"><label>품목명</label><input id="f_item" value="${x.item||''}"></div>
+    <div class="form-grid">
+      <div class="form-row"><label>자재비 (원)</label><input id="f_mat" type="number" value="${x.material||0}"></div>
+      <div class="form-row"><label>인건비 (원)</label><input id="f_lab" type="number" value="${x.labor||0}"></div>
+    </div>
+    <div class="form-grid">
+      <div class="form-row"><label>경비 / 기타 (원)</label><input id="f_ovh" type="number" value="${x.overhead||0}"></div>
+      <div class="form-row"><label>비고</label><input id="f_note" value="${x.note||''}"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal()">취소</button>
+      <button class="btn primary" onclick="updateCost('${id}')">저장</button>
+    </div>
+  </div>`;
+  document.getElementById('modal-area').innerHTML=`<div class="modal-overlay" onclick="ovClose(event)">${html}</div>`;
+}
+
+function updateCost(id){
+  const item=document.getElementById('f_item').value.trim();
+  if(!item){alert('품목명을 입력하세요.');return;}
+  let data=load(K.cost);
+  data=data.map(x=>x.id===id?{...x,
+    projectId:document.getElementById('f_proj').value,
+    item,
+    material:Number(document.getElementById('f_mat').value||0),
+    labor:Number(document.getElementById('f_lab').value||0),
+    overhead:Number(document.getElementById('f_ovh').value||0),
+    note:document.getElementById('f_note').value
+  }:x);
+  save(K.cost,data);
+  if(gsUrl){clearTimeout(window._syncDebounce);window._syncDebounce=setTimeout(()=>pushToSheets(),2000);}
+  closeModal();renderAll();
+}
+
 function deletePurch(id){if(confirm('삭제하시겠습니까?')){save(K.purch,load(K.purch).filter(x=>x.id!==id));renderAll();}}
 function saveCostItem(){
   const item=document.getElementById('f_item').value.trim();
@@ -946,41 +1053,48 @@ function initSettleProj(){
 function loadSettleData(){
   const pid=document.getElementById('settleProj').value;
   if(!pid) return;
+
+  // ★ 해당 프로젝트 데이터만 필터링
   const purch=load(K.purch).filter(x=>x.projectId===pid&&x.category==='외주가공');
   const costs=load(K.cost).filter(x=>x.projectId===pid);
 
-  // a: 외주가공 → 자동 채워넣기
-  const rowsA=document.getElementById('settle-rows-a');
-  rowsA.innerHTML='';
+  // ★ 모든 섹션 완전 초기화 (다른 프로젝트 데이터 잔류 방지)
+  ['a','b','c'].forEach(s=>{
+    const el=document.getElementById('settle-rows-'+s);
+    if(el) el.innerHTML='';
+  });
+  const rowsP=document.getElementById('settle-pay-rows');
+  if(rowsP) rowsP.innerHTML='';
+
+  // a: 외주가공
   if(purch.length){
-    purch.forEach(p=>addSettleRow('a',{cat:'외주',desc:p.vendor+(p.note?` (${p.note})`:''),unit:'식',qty:1,price:p.amount}));
+    purch.forEach(p=>addSettleRow('a',{cat:'외주',desc:p.vendor+(p.note?' ('+p.note+')':''),unit:'식',qty:1,price:p.amount}));
   } else addSettleRow('a');
 
-  // b: 자재비 → 제작/가공
-  const rowsB=document.getElementById('settle-rows-b');
-  rowsB.innerHTML='';
+  // b: 자재비/제작가공
   if(costs.length){
-    costs.forEach(c=>{
-      if(c.material>0) addSettleRow('b',{cat:'제작/가공',desc:c.item,unit:'식',qty:1,price:c.material});
+    costs.forEach(cost=>{
+      if(Number(cost.material)>0) addSettleRow('b',{cat:'제작/가공',desc:cost.item,unit:'식',qty:1,price:cost.material});
     });
+    if(!costs.some(cost=>Number(cost.material)>0)) addSettleRow('b');
   } else addSettleRow('b');
 
   // c: 인건비/경비
-  const rowsC=document.getElementById('settle-rows-c');
-  rowsC.innerHTML='';
   if(costs.length){
-    costs.forEach(c=>{
-      if(c.labor>0)    addSettleRow('c',{cat:'인건비',desc:c.item+' 인건비',unit:'식',qty:1,price:c.labor});
-      if(c.overhead>0) addSettleRow('c',{cat:'경비',desc:c.item+' 경비',unit:'식',qty:1,price:c.overhead});
+    costs.forEach(cost=>{
+      if(Number(cost.labor)>0)    addSettleRow('c',{cat:'인건비',desc:cost.item+' 인건비',unit:'식',qty:1,price:cost.labor});
+      if(Number(cost.overhead)>0) addSettleRow('c',{cat:'경비',desc:cost.item+' 경비',unit:'식',qty:1,price:cost.overhead});
     });
+    if(!costs.some(cost=>Number(cost.labor)>0||Number(cost.overhead)>0)){
+      addSettleRow('c',{cat:'인건비',desc:'인지세,세금납부',unit:'식',qty:1,price:150000});
+      addSettleRow('c',{cat:'경비',desc:'관리경비',unit:'식',qty:1,price:600000});
+    }
   } else {
     addSettleRow('c',{cat:'인건비',desc:'인지세,세금납부',unit:'식',qty:1,price:150000});
     addSettleRow('c',{cat:'경비',desc:'관리경비',unit:'식',qty:1,price:600000});
   }
 
   // 지급내역
-  const rowsP=document.getElementById('settle-pay-rows');
-  rowsP.innerHTML='';
   if(purch.length){
     purch.forEach(p=>addPayRow(p.vendor,p.amount,p.amount,0));
   } else addPayRow();
@@ -1437,25 +1551,59 @@ async function pullFromSheets(){
 async function syncNow(){
   if(!gsUrl){ alert('먼저 연동 설정을 완료하세요.'); return; }
   updateSyncBar('syncing');
-  // 1. 서버에서 최신 데이터 가져오기
+
+  const local_proj  = load(K.proj);
+  const local_purch = load(K.purch);
+  const local_cost  = load(K.cost);
+  const local_hist  = load(K.hist);
+
+  // 1. 서버에서 최신 데이터 pull
   const remote = await pullFromSheets();
+
   if(remote && remote.proj){
-    // 원격 데이터가 있으면 로컬에 덮어쓰기
-    save(K.proj, remote.proj||[]);
-    save(K.purch, remote.purch||[]);
-    save(K.cost, remote.cost||[]);
-    // 이력은 첨부파일 보존을 위해 merge
-    const localHist = load(K.hist);
-    const remoteHist = remote.hist||[];
-    const merged = remoteHist.map(rh=>{
-      const lh = localHist.find(x=>x.id===rh.id);
-      return lh ? {...rh, attachments: lh.attachments||[]} : rh;
-    });
-    // 로컬에만 있는 이력 추가
-    localHist.forEach(lh=>{ if(!merged.find(x=>x.id===lh.id)) merged.push(lh); });
-    save(K.hist, merged);
+    const remoteHasData = (remote.proj||[]).length > 0;
+    const localHasData  = local_proj.length > 0;
+
+    if(remoteHasData){
+      // 원격에 데이터가 있을 때만 로컬에 반영 (빈 원격으로 덮어쓰기 방지)
+      // 원격 건수 >= 로컬 건수이거나, 로컬이 비어있을 때만 원격 우선
+      if((remote.proj||[]).length >= local_proj.length || !localHasData){
+        save(K.proj,  remote.proj||[]);
+        save(K.purch, remote.purch||[]);
+        save(K.cost,  remote.cost||[]);
+      } else {
+        // 로컬이 더 많을 때 → 로컬 기준으로 merge (삭제된 항목 제외)
+        const rIds = new Set((remote.proj||[]).map(x=>x.id));
+        const merged_proj  = [...(remote.proj||[])];
+        local_proj.forEach(lp=>{ if(!rIds.has(lp.id)) merged_proj.push(lp); });
+        save(K.proj, merged_proj);
+
+        const rPIds = new Set((remote.purch||[]).map(x=>x.id));
+        const merged_purch = [...(remote.purch||[])];
+        local_purch.forEach(lp=>{ if(!rPIds.has(lp.id)) merged_purch.push(lp); });
+        save(K.purch, merged_purch);
+
+        const rCIds = new Set((remote.cost||[]).map(x=>x.id));
+        const merged_cost = [...(remote.cost||[])];
+        local_cost.forEach(lc=>{ if(!rCIds.has(lc.id)) merged_cost.push(lc); });
+        save(K.cost, merged_cost);
+      }
+
+      // 이력: 항상 merge (첨부파일 보존)
+      const remoteHist = remote.hist||[];
+      const merged_hist = remoteHist.map(rh=>{
+        const lh = local_hist.find(x=>x.id===rh.id);
+        return lh ? {...rh, attachments: lh.attachments||[]} : rh;
+      });
+      local_hist.forEach(lh=>{ if(!merged_hist.find(x=>x.id===lh.id)) merged_hist.push(lh); });
+      save(K.hist, merged_hist);
+
+    } else if(localHasData){
+      // 원격이 비어있고 로컬에 데이터 있음 → 로컬 유지, push만
+    }
     renderAll();
   }
+
   // 2. 로컬 데이터를 서버에 push
   const ok = await pushToSheets();
   const now = new Date();
