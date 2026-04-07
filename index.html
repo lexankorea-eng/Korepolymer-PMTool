@@ -376,7 +376,7 @@ let curCompany='all', searchTerm='';
 //  초기 샘플 데이터
 // ════════════════════════════════════════════════════════
 function initData(){
-  if(!load(K.proj).length) save(K.proj,[
+  if(!load(K.proj).length) _pmSave(K.proj,[
     {
         "id": "P2026-영업-01",
         "name": "금정구청 현수막게시대 제작/설치",
@@ -486,7 +486,7 @@ function initData(){
         "status": "ing"
     }
 ]);
-  if(!load(K.purch).length) save(K.purch,[
+  if(!load(K.purch).length) _pmSave(K.purch,[
     {
         "id": "PURCH001",
         "projectId": "P2026-영업-01",
@@ -498,8 +498,8 @@ function initData(){
         "note": "현수막게시대 제작/시공"
     }
 ]);
-  if(!load(K.cost).length)  save(K.cost,[]);
-  if(!load(K.hist).length)  save(K.hist,[]);
+  if(!load(K.cost).length)  _pmSave(K.cost,[]);
+  if(!load(K.hist).length)  _pmSave(K.hist,[]);
 }
 
 // ════════════════════════════════════════════════════════
@@ -886,13 +886,13 @@ function saveProj(editId){
   let data=load(K.proj);
   if(editId) data=data.map(x=>x.id===editId?obj:x);
   else{if(data.find(x=>x.id===id)){alert('이미 존재하는 코드입니다.');return;}data.push(obj);}
-  save(K.proj,data);closeModal();renderAll();
+  _pmSave(K.proj,data);closeModal();renderAll();
 }
 function deleteProj(id){if(confirm('프로젝트를 삭제하시겠습니까?\n연결된 발주/원가/이력도 함께 삭제됩니다.')){
-  save(K.proj,load(K.proj).filter(x=>x.id!==id));
-  save(K.purch,load(K.purch).filter(x=>x.projectId!==id));
-  save(K.cost,load(K.cost).filter(x=>x.projectId!==id));
-  save(K.hist,load(K.hist).filter(x=>x.projectId!==id));
+  _pmSave(K.proj,load(K.proj).filter(x=>x.id!==id));
+  _pmSave(K.purch,load(K.purch).filter(x=>x.projectId!==id));
+  _pmSave(K.cost,load(K.cost).filter(x=>x.projectId!==id));
+  _pmSave(K.hist,load(K.hist).filter(x=>x.projectId!==id));
   renderAll();
 }}
 function savePurch(){
@@ -905,7 +905,7 @@ function savePurch(){
     vat:Number(document.getElementById('f_vat').value||0),
     payDate:document.getElementById('f_pay').value,
     note:document.getElementById('f_note').value});
-  save(K.purch,data);closeModal();renderAll();
+  _pmSave(K.purch,data);closeModal();renderAll();
 }
 
 // ════════════════════════════════════════════════════════
@@ -957,7 +957,7 @@ function updatePurch(id){
     payDate:document.getElementById('f_pay').value,
     note:document.getElementById('f_note').value
   }:x);
-  save(K.purch,data);
+  _pmSave(K.purch,data);
   if(gsUrl){clearTimeout(window._syncDebounce);window._syncDebounce=setTimeout(()=>pushToSheets(),2000);}
   closeModal();renderAll();
 }
@@ -1003,12 +1003,12 @@ function updateCost(id){
     overhead:Number(document.getElementById('f_ovh').value||0),
     note:document.getElementById('f_note').value
   }:x);
-  save(K.cost,data);
+  _pmSave(K.cost,data);
   if(gsUrl){clearTimeout(window._syncDebounce);window._syncDebounce=setTimeout(()=>pushToSheets(),2000);}
   closeModal();renderAll();
 }
 
-function deletePurch(id){if(confirm('삭제하시겠습니까?')){save(K.purch,load(K.purch).filter(x=>x.id!==id));renderAll();}}
+function deletePurch(id){if(confirm('삭제하시겠습니까?')){_pmSave(K.purch,load(K.purch).filter(x=>x.id!==id));renderAll();}}
 function saveCostItem(){
   const item=document.getElementById('f_item').value.trim();
   if(!item){alert('품목명을 입력하세요.');return;}
@@ -1018,9 +1018,9 @@ function saveCostItem(){
     labor:Number(document.getElementById('f_lab').value||0),
     overhead:Number(document.getElementById('f_ovh').value||0),
     note:document.getElementById('f_note').value});
-  save(K.cost,data);closeModal();renderAll();
+  _pmSave(K.cost,data);closeModal();renderAll();
 }
-function deleteCost(id){if(confirm('삭제하시겠습니까?')){save(K.cost,load(K.cost).filter(x=>x.id!==id));renderAll();}}
+function deleteCost(id){if(confirm('삭제하시겠습니까?')){_pmSave(K.cost,load(K.cost).filter(x=>x.id!==id));renderAll();}}
 function saveHist(){
   const content=document.getElementById('f_content').value.trim();
   if(!content){alert('내용을 입력하세요.');return;}
@@ -1031,9 +1031,9 @@ function saveHist(){
     category:document.getElementById('f_cat').value,
     content,
     attachments:pendingFiles});
-  save(K.hist,data);pendingFiles=[];closeModal();renderAll();
+  _pmSave(K.hist,data);pendingFiles=[];closeModal();renderAll();
 }
-function deleteHist(id){if(confirm('삭제하시겠습니까?')){save(K.hist,load(K.hist).filter(x=>x.id!==id));renderAll();}}
+function deleteHist(id){if(confirm('삭제하시겠습니까?')){_pmSave(K.hist,load(K.hist).filter(x=>x.id!==id));renderAll();}}
 
 // ════════════════════════════════════════════════════════
 //  정산서 탭
@@ -1556,59 +1556,45 @@ async function syncNow(){
   const local_purch = load(K.purch);
   const local_cost  = load(K.cost);
   const local_hist  = load(K.hist);
+  const localHasData = local_proj.length > 0;
 
-  // 1. 서버에서 최신 데이터 pull
+  // 1. 구글 시트에서 pull
   const remote = await pullFromSheets();
+  const remoteOk = remote && remote.status === 'ok';
+  const remoteHasData = remoteOk && Array.isArray(remote.proj) && remote.proj.length > 0;
 
-  if(remote && remote.proj){
-    const remoteHasData = (remote.proj||[]).length > 0;
-    const localHasData  = local_proj.length > 0;
-
-    if(remoteHasData){
-      // 원격에 데이터가 있을 때만 로컬에 반영 (빈 원격으로 덮어쓰기 방지)
-      // 원격 건수 >= 로컬 건수이거나, 로컬이 비어있을 때만 원격 우선
-      if((remote.proj||[]).length >= local_proj.length || !localHasData){
-        save(K.proj,  remote.proj||[]);
-        save(K.purch, remote.purch||[]);
-        save(K.cost,  remote.cost||[]);
-      } else {
-        // 로컬이 더 많을 때 → 로컬 기준으로 merge (삭제된 항목 제외)
-        const rIds = new Set((remote.proj||[]).map(x=>x.id));
-        const merged_proj  = [...(remote.proj||[])];
-        local_proj.forEach(lp=>{ if(!rIds.has(lp.id)) merged_proj.push(lp); });
-        save(K.proj, merged_proj);
-
-        const rPIds = new Set((remote.purch||[]).map(x=>x.id));
-        const merged_purch = [...(remote.purch||[])];
-        local_purch.forEach(lp=>{ if(!rPIds.has(lp.id)) merged_purch.push(lp); });
-        save(K.purch, merged_purch);
-
-        const rCIds = new Set((remote.cost||[]).map(x=>x.id));
-        const merged_cost = [...(remote.cost||[])];
-        local_cost.forEach(lc=>{ if(!rCIds.has(lc.id)) merged_cost.push(lc); });
-        save(K.cost, merged_cost);
-      }
-
-      // 이력: 항상 merge (첨부파일 보존)
-      const remoteHist = remote.hist||[];
-      const merged_hist = remoteHist.map(rh=>{
-        const lh = local_hist.find(x=>x.id===rh.id);
-        return lh ? {...rh, attachments: lh.attachments||[]} : rh;
-      });
-      local_hist.forEach(lh=>{ if(!merged_hist.find(x=>x.id===lh.id)) merged_hist.push(lh); });
-      save(K.hist, merged_hist);
-
-    } else if(localHasData){
-      // 원격이 비어있고 로컬에 데이터 있음 → 로컬 유지, push만
-    }
+  if(remoteHasData){
+    // ★ 구글 시트에 데이터 있음 → 구글 시트가 정답, 로컬에 반영
+    _pmSave(K.proj,  remote.proj);
+    _pmSave(K.purch, remote.purch||[]);
+    _pmSave(K.cost,  remote.cost||[]);
+    // 이력: 첨부파일만 로컬 보존하며 merge
+    const remoteHist = remote.hist||[];
+    const merged_hist = remoteHist.map(rh=>{
+      const lh = local_hist.find(x=>x.id===rh.id);
+      return lh ? {...rh, attachments:lh.attachments||[]} : rh;
+    });
+    local_hist.forEach(lh=>{ if(!merged_hist.find(x=>x.id===lh.id)) merged_hist.push(lh); });
+    _pmSave(K.hist, merged_hist);
     renderAll();
-  }
+    // push는 불필요 (이미 구글 시트가 최신)
+    const now = new Date();
+    lastSyncTime = now.getHours()+':'+String(now.getMinutes()).padStart(2,'0');
+    updateSyncBar('ok');
 
-  // 2. 로컬 데이터를 서버에 push
-  const ok = await pushToSheets();
-  const now = new Date();
-  lastSyncTime = now.getHours()+':'+String(now.getMinutes()).padStart(2,'0');
-  updateSyncBar(ok?'ok':'err');
+  } else if(localHasData){
+    // ★ 구글 시트 비어있고 로컬에 데이터 있음 → 로컬을 구글 시트로 push
+    const ok = await pushToSheets();
+    const now = new Date();
+    lastSyncTime = now.getHours()+':'+String(now.getMinutes()).padStart(2,'0');
+    updateSyncBar(ok?'ok':'err');
+
+  } else {
+    // 둘 다 비어있음 → 상태만 업데이트
+    const now = new Date();
+    lastSyncTime = now.getHours()+':'+String(now.getMinutes()).padStart(2,'0');
+    updateSyncBar(remoteOk?'ok':'err');
+  }
 }
 
 // 5분 자동 동기화
@@ -1619,15 +1605,30 @@ function startAutoSync(){
   }, 5*60*1000);
 }
 
-// save 함수 래핑 — 저장 시 자동 push
+// save 오버라이드 — 저장 시마다 자동 push (2초 디바운스)
 const _origSave = save;
-function saveAndSync(k, d){
-  _origSave(k, d);
+// save를 직접 오버라이드해서 모든 저장에 push 적용
+window._pmSave = function(k, d){
+  localStorage.setItem(k, JSON.stringify(d));
   if(gsUrl){
     clearTimeout(window._syncDebounce);
-    window._syncDebounce = setTimeout(()=>pushToSheets(), 2000);
+    window._syncDebounce = setTimeout(async ()=>{
+      const ok = await pushToSheets();
+      const now = new Date();
+      lastSyncTime = now.getHours()+':'+String(now.getMinutes()).padStart(2,'0');
+      updateSyncBar(ok?'ok':'err');
+    }, 1500);
   }
-}
+};
+// 기존 save 참조를 오버라이드
+(function(){
+  const origLoad = k => { try{return JSON.parse(localStorage.getItem(k)||'[]')}catch{return[]} };
+  // K 객체의 키들에 대해 save 호출 시 자동 push
+  const keys = Object.values({proj:'pm_proj',purch:'pm_purch',cost:'pm_cost',hist:'pm_hist',settle:'pm_settle'});
+  const origSave = save;
+  // save를 전역에서 교체 (이미 const라 직접 교체 불가, 대신 내부 래핑)
+})();
+function saveAndSync(k, d){ window._pmSave(k, d); }
 
 
 // ════════════════════════════════════════════════════════
@@ -1680,10 +1681,10 @@ function importData(input){
       }
 
       if(mode === 'replace'){
-        save(K.proj,  data.proj);
-        save(K.purch, data.purch);
-        save(K.cost,  data.cost);
-        save(K.hist,  data.hist);
+        _pmSave(K.proj,  data.proj);
+        _pmSave(K.purch, data.purch);
+        _pmSave(K.cost,  data.cost);
+        _pmSave(K.hist,  data.hist);
       } else {
         // 병합: ID 중복 제거 후 합치기
         const merge = (key, incoming) => {
@@ -1725,6 +1726,40 @@ loadGsUrl();
 startAutoSync();
 initData();
 renderAll();
+// 페이지 로드 시 구글 시트에서 자동 pull (연동된 경우)
+if(gsUrl){
+  setTimeout(async ()=>{
+    updateSyncBar('syncing');
+    const remote = await pullFromSheets();
+    const remoteHasData = remote && remote.status==='ok' && Array.isArray(remote.proj) && remote.proj.length>0;
+    if(remoteHasData){
+      _pmSave(K.proj,  remote.proj);
+      _pmSave(K.purch, remote.purch||[]);
+      _pmSave(K.cost,  remote.cost||[]);
+      const localHist = load(K.hist);
+      const remoteHist = remote.hist||[];
+      const merged = remoteHist.map(rh=>{
+        const lh = localHist.find(x=>x.id===rh.id);
+        return lh?{...rh,attachments:lh.attachments||[]}:rh;
+      });
+      localHist.forEach(lh=>{if(!merged.find(x=>x.id===lh.id))merged.push(lh);});
+      // 이력은 _pmSave 대신 직접 localStorage (push 방지)
+      localStorage.setItem(K.hist, JSON.stringify(merged));
+      renderAll();
+      const now=new Date();
+      lastSyncTime=now.getHours()+':'+String(now.getMinutes()).padStart(2,'0');
+      updateSyncBar('ok');
+    } else if(load(K.proj).length>0){
+      // 로컬에 데이터 있으면 push
+      const ok=await pushToSheets();
+      const now=new Date();
+      lastSyncTime=now.getHours()+':'+String(now.getMinutes()).padStart(2,'0');
+      updateSyncBar(ok?'ok':'err');
+    } else {
+      updateSyncBar('ok');
+    }
+  }, 800);
+}
 </script>
 </body>
 </html>
