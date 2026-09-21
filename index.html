@@ -207,7 +207,7 @@ tr.yr24:hover td{background:#FFF9D0}
       <option value="">— 이름을 선택하세요 —</option>
       <option>조민</option><option>변기식</option><option>송성호</option>
       <option>조정호</option><option>조정헌</option><option>박규열</option>
-      <option>정민지</option><option>서영주</option><option>조형찬</option>
+      <option>정민지</option><option>서영주</option>
       <option>윤준호</option><option>기타</option>
     </select>
     <input class="lock-input" type="password" id="lockPw" placeholder="••••" maxlength="10"
@@ -456,21 +456,44 @@ let fbReady = false;
 // 로컬 캐시 우선 읽기 (렌더 함수들이 동기적으로 호출)
 const load = k => CACHE[k] || [];
 
-// Firebase에 저장 (실시간 전파)
-const save = (k, arr) => {
-  CACHE[k] = arr;
-  if(!db || !fbReady) {
-    // 오프라인 백업
-    try{ localStorage.setItem('pm_backup_'+k, JSON.stringify(arr)); }catch(e){}
-    return;
+// 비교용: 빈값·메타필드 무시, 키 순서 무관
+function _norm(o){
+  const out = {};
+  Object.keys(o||{}).sort().forEach(k=>{
+    if(k==='_by' || k==='_at') return;
+    const v = o[k];
+    if(v===''||v===null||v===undefined) return;
+    if(Array.isArray(v) && !v.length) return;
+    out[k] = v;
+  });
+  return JSON.stringify(out);
+}
+
+// Firebase에 저장 (실시간 전파) — 실제 바뀐 항목에만 수정자·시각 기록
+const save = (k, arr, by) => {
+  const prev = {};
+  (CACHE[k]||[]).forEach(x=>{ if(x && x.id) prev[x.id] = x; });
+  const who = by || ME || '시스템';
+  const stamped = (arr||[]).map(item=>{
+    if(!item || !item.id) return item;
+    const p = prev[item.id];
+    if(p && _norm(p) === _norm(item)) return {...item, _by:p._by, _at:p._at};
+    return {...item, _by:who, _at:Date.now()};
+  });
+  CACHE[k] = stamped;
+  if(!db || !fbReady){
+    try{ localStorage.setItem('pm_backup_'+k, JSON.stringify(stamped)); }catch(e){}
+    return Promise.resolve();
   }
   const obj = {};
-  (arr||[]).forEach(item=>{
+  stamped.forEach(item=>{
     if(item && item.id){
-      obj[sanitizeKey(item.id)] = {...item, _by: ME, _at: Date.now()};
+      const clean = {};
+      Object.keys(item).forEach(f=>{ if(item[f]!==undefined) clean[f]=item[f]; });
+      obj[sanitizeKey(item.id)] = clean;
     }
   });
-  db.ref('pm/'+k).set(obj).catch(e=>console.error('저장 실패',k,e));
+  return db.ref('pm/'+k).set(obj).catch(e=>console.error('저장 실패',k,e));
 };
 const _pmSave = save;
 
@@ -496,6 +519,7 @@ function initFirebase(){
       fbReady = on;
       setLive(on, on ? '실시간 연결됨' : '연결 끊김 — 재접속 중');
       if(on) registerPresence();
+      if(on && !window._pmInitDone){ window._pmInitDone = true; initData(); }
     });
 
     // 각 컬렉션 실시간 구독
@@ -571,6 +595,7 @@ const uid=()=>'P'+Date.now().toString(36).toUpperCase().slice(-6);
 //  상태
 // ════════════════════════════════════════════════════════
 let curCompany='all', searchTerm='';
+const STAFF = ['조민','변기식','송성호','조정호','조정헌','박규열','정민지','서영주','윤준호'];
 
 // ════════════════════════════════════════════════════════
 //  초기 샘플 데이터
@@ -607,12 +632,16 @@ function nextQuoteId(){
 
 // 공사번호 자동 생성 (P26-0407-1 형식)
 function nextProjId(){
-  const d = new Date();
-  const yr = String(d.getFullYear()).slice(2);
-  const md = String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0');
-  const prefix = 'P'+yr+'-'+md+'-';
-  const list = load(K.proj).filter(p=>p.id && p.id.startsWith(prefix));
-  return prefix + (list.length+1);
+  // 통일 형식: P{연도4}-영업-{2자리 연번}   예) P2026-영업-20
+  const yr = new Date().getFullYear();
+  const prefix = 'P' + yr + '-영업-';
+  let max = 0;
+  load(K.proj).forEach(p=>{
+    if(!p.id) return;
+    const m = String(p.id).match(/^P(\d{4})-영업-(\d+)$/);
+    if(m && m[1] === String(yr)) max = Math.max(max, parseInt(m[2]));
+  });
+  return prefix + String(max+1).padStart(2,'0');
 }
 
 function getQuotes(){
@@ -701,9 +730,22 @@ function convertToProject(qid){
   if(q.linkedProj){ alert('이미 공사번호 '+q.linkedProj+' 로 전환됐습니다.'); return; }
 
   const newId = nextProjId();
-  if(!confirm('견적 '+qid+' 를 공사로 전환합니다.\n\n새 공사번호: '+newId+'\n공사명: '+q.name+'\n계약금액: '+fmt(q.amount)+'원\n\n진행할까요?')) return;
+  const qOwner = q.owner || '';
+  // 최종계약자: 로그인 사용자 기본값, 확인 입력
+  const sOwner = prompt(
+    '【계약 전환】\n\n'
+    +'견적번호 : '+qid+'\n'
+    +'견적자   : '+(qOwner||'(미지정)')+'\n'
+    +'신규 공사번호 : '+newId+'\n'
+    +'공사명   : '+q.name+'\n'
+    +'계약금액 : '+fmt(q.amount)+'원\n\n'
+    +'▶ 최종계약자(책임 영업자) 이름을 입력하세요.',
+    ME || qOwner
+  );
+  if(sOwner === null) return;
+  const sv = String(sOwner).trim();
+  if(!sv){ alert('최종계약자는 반드시 입력해야 합니다.'); return; }
 
-  // 프로젝트 생성
   const projs = load(K.proj);
   projs.push({
     id: newId,
@@ -716,16 +758,17 @@ function convertToProject(qid){
     start: new Date().toISOString().slice(0,10),
     end: '',
     status: 'prep',
-    fromQuote: qid
+    fromQuote: qid,
+    quoteOwner: qOwner,
+    salesOwner: sv
   });
   _pmSave(K.proj, projs);
 
-  // 견적에 연계번호 기록
   const updated = quotes.map(x=>x.id===qid ? {...x, linkedProj:newId} : x);
   _pmSave(K.quote, updated);
 
   renderAll();
-  alert('✅ 전환 완료\n공사번호: '+newId+'\n\n프로젝트 탭에서 계약구분·기간 등을 보완해주세요.');
+  alert('✅ 계약 전환 완료\n\n공사번호 : '+newId+'\n견적자 : '+(qOwner||'(미지정)')+'\n최종계약자 : '+sv+'\n\n프로젝트 탭에서 계약구분·기간을 보완해주세요.');
 }
 
 function deleteQuote(id){
@@ -764,30 +807,141 @@ function saveQuote(editId){
   closeModal(); renderAll();
 }
 
-const SEED_QUOTES = [{"id":"Q25-1001","recvDate":"2025-10-27","client":"디자인 모두","name":"함안 박물관 내 웨이판인딩","scope":"바닥용실사/열융착작업","amount":1235000,"owner":"변기식","reviewDate":"2025-10-27","sendDate":"2025-10-27","status":"won","linkedProj":"P25-1027-1"},{"id":"Q25-1002","recvDate":"2025-10-29","client":"디아이디엔터","name":"3T포맥스+실사 출력작업 건","scope":"3T 포마트(백색)+실사작업요청","amount":900000,"owner":"송성호","reviewer":"조민","reviewDate":"2025-10-29","sendDate":"2025-10-29","status":"won"},{"id":"Q25-1003","recvDate":"2025-10-31","client":"금광기획","name":"광주송정시장바닥웨이파인딩","scope":"웨이파인딩(열융착)작업","amount":16000000,"owner":"조민","reviewer":"변기식","reviewDate":"2025-10-31","sendDate":"2025-10-31","status":"quoting"},{"id":"Q25-1004","recvDate":"2025-11-03","client":"동아화인텍","name":"1/2inch V-0 제품문의","scope":"렉산 V-0 제품문의","amount":1860000,"owner":"조민","reviewer":"허병일","reviewDate":"2025-11-03","sendDate":"2025-11-03","status":"won"},{"id":"Q25-1005","recvDate":"2025-11-06","client":"제부도케이블카","name":"NON SLIP & AL.STICKER 추가건","scope":"바닥 웨이파인딩 건","amount":1492000,"owner":"변기식","reviewDate":"2025-11-06","sendDate":"2025-11-06","status":"quoting"},{"id":"Q25-1006","recvDate":"2025-11-05","client":"한국소재융합연구원","name":"실내독립부스 설치","amount":20200000,"owner":"박규열","reviewDate":"2025-11-05","status":"quoting"},{"id":"Q25-1007","recvDate":"2025-11-05","client":"에스엠유통(양정인쇄)","name":"실사출력문의","scope":"실사+포마트 부착 작업","amount":36300,"owner":"송성호","status":"quoting"},{"id":"Q25-1008","recvDate":"2025-11-07","client":"주식회사 뷰산실업","name":"복층판 - 국산","amount":1668000,"owner":"서영주","status":"quoting"},{"id":"Q25-1009","recvDate":"2025-11-07","client":"일반손님","name":"MS코리아","amount":641000,"owner":"송성호","status":"quoting"},{"id":"Q25-1010","recvDate":"2025-11-07","client":"제부도케이블카","name":"크리스탈용 4MILL","amount":600000,"owner":"변기식","status":"quoting"},{"id":"Q25-1011","recvDate":"2025-11-17","client":"일반손님","name":"10T 투명 PC 가공문의","scope":"PC CNC가공 상담","amount":220000,"owner":"송성호","reviewDate":"2025-11-17","sendDate":"2025-11-17","status":"quoting"},{"id":"Q25-1012","recvDate":"2025-11-18","client":"(주) 키예노","name":"아크릴 재단","scope":"선반용 아크릴 재단","amount":2377000,"owner":"조정호","reviewer":"키예노 입찰에서 탈락되어 공사 진행 불가","status":"quoting"},{"id":"Q25-1013","recvDate":"2025-11-20","client":"디자인그룹예진","name":"현대포터2 랩핑실사","amount":1400000,"owner":"조정호","status":"quoting"},{"id":"Q25-1014","recvDate":"2025-11-21","client":"디아이디 엔터테인먼트","name":"실사출력/재단문의","amount":1264000,"owner":"조민","status":"lost","lostReason":"고객사 수주실패"},{"id":"Q25-1015","recvDate":"2025-11-21","client":"일반손님","name":"CNC작업","scope":"인조대리석 원판 5장 작업","amount":3000000,"owner":"송성호","status":"quoting"},{"id":"Q25-1016","recvDate":"2025-11-21","client":"한화하우징","name":"복층판 재단","scope":"10T복층판 재단","amount":1041000,"owner":"조정호","status":"quoting"},{"id":"Q25-1017","recvDate":"2025-11-24","client":"주식회사 아난티코브","name":"아난티코브 공용부 외부필름 철거 및 시공","amount":25580000,"owner":"조정호","reviewer":"26년 사업계획에 따른 예가 산정 견적","status":"quoting"},{"id":"Q25-1018","recvDate":"2025-11-24","client":"성창애스앤디","name":"블랙아웃필름 부착공사(경주)","scope":"외부윈도우필름부착","amount":11224000,"owner":"조민","sendDate":"2025-11-24","status":"lost","lostReason":"고객사 수주실패"},{"id":"Q25-1019","recvDate":"2025-11-25","client":"부산시설공단","name":"수영강변대로 보행육교 실리콘 공사 건","scope":"현장작업","amount":6303000,"owner":"조정호","status":"quoting"},{"id":"Q25-1020","recvDate":"2025-11-27","client":"라인테크닉스","name":"난연렉산PC문의","scope":"F2000 8T 1250*2050","amount":1330000,"owner":"조민","status":"lost","lostReason":"MOQ (3톤)충족불가"},{"id":"Q25-1021","recvDate":"2025-12-08","client":"블루스퀘어","name":"4.5T SG305OB 제품문의","scope":"4.5T 2000*4000 제품","amount":916000,"owner":"조민","sendDate":"2025-12-08","status":"won","note":"반룡출고"},{"id":"Q25-1022","recvDate":"2025-12-12","client":"MJ디자인","name":"양정교차로 실사출력","scope":"조명용실사출력제작/설치","amount":3745000,"owner":"조민","sendDate":"2025-12-12","status":"quoting"},{"id":"Q25-1023","recvDate":"2025-12-12","client":"MS","name":"경북의성 그린골판PC납품","scope":"1000*1300 1140장","amount":14706000,"owner":"조민","reviewer":"서영주","sendDate":"2025-12-12","status":"won","note":"1월 출고예정"},{"id":"Q25-1024","recvDate":"2025-12-16","client":"아난티","name":"열차단필름시공","scope":"아난티 남,여 사우나 열차단 필름 시공","amount":7632000,"owner":"조정호","status":"quoting"},{"id":"Q25-1025","recvDate":"2025-12-18","client":"킴스아트미술관","name":"실내사인물제작","scope":"2T포맥스출력물","amount":686000,"owner":"정민지","status":"quoting"},{"id":"Q25-1026","recvDate":"2025-12-19","client":"㈜ 동남엘리베이터","name":"투명스티커 실사","scope":"실사출력+멀티컷","amount":280000,"owner":"정민지","status":"quoting"},{"id":"Q25-1027","recvDate":"2025-12-22","client":"더빌드","name":"알마이트 재단/납품","scope":"영도현장 수직정원 내 알마이트 재단/납품","amount":1977600,"owner":"조민","status":"lost","lostReason":"고객사 사양  불일치","note":"신규업체 - 인터넷문의"},{"id":"Q25-1028","recvDate":"2025-12-23","client":"주식회사 화경","name":"PC재단 문의","scope":"롤PC 1440*3320","amount":1920000,"owner":"조정호","status":"quoting"},{"id":"Q25-1029","recvDate":"2025-12-29","client":"주식회사 아난티코브","name":"필름시공문의","scope":"공용구간 5층~11층 필름","amount":9800000,"owner":"조정호","status":"quoting"},{"id":"Q26-1001","recvDate":"2026-01-05","client":"낙동강관리본부","name":"삼락생태공원관리사무소 상담 진행","scope":"안내판 신규제작/설치","amount":4220000,"owner":"조민","reviewer":"변기식","reviewDate":"2026-01-05","status":"quoting","lostReason":"상반기 낙동강공원 전체 사업실시 예정"},{"id":"Q26-1002","recvDate":"2026-01-08","client":"낙동강관리본부","name":"대저생태공원 상담 진행","scope":"시설물보수 공사 문의","amount":0,"owner":"조형찬","reviewer":"조민","reviewDate":"2026-01-13","status":"won","linkedProj":"P2026-영업-03, P2026-영업-05","note":"[금액]2건 견적완료 / 추가공사1건 접수"},{"id":"Q26-1003","recvDate":"2026-01-12","client":"동해중학교","name":"학교시설물보수공사","scope":"전광판 및 간판교체작업 문의","amount":40500000,"owner":"조민","reviewer":"변기식","reviewDate":"2026-01-12","sendDate":"2025-01-19","status":"hold","lostReason":"고객사 예산부족으로 향후 사업 진행 예정"},{"id":"Q26-1004","recvDate":"2026-01-14","client":"㈜부영마린","name":"안내판 설치","scope":"공장 앞 안내판 설치작업 (자재 사급)","amount":260000,"owner":"윤준호","reviewer":"조민","reviewDate":"2026-01-14","sendDate":"2025-01-14","status":"lost","lostReason":"고객사 자체 작업으로 결정"},{"id":"Q26-1005","recvDate":"2026-01-15","client":"부산항보안공사","name":"안내판 제작문의","scope":"안내판 2건 제작/신설문의","amount":900000,"owner":"조민","reviewDate":"2026-01-15","sendDate":"2025-01-15","status":"quoting"},{"id":"Q26-1006","recvDate":"2026-01-15","client":"디자인글꼴","name":"사인물 제작/설치문의","scope":"망미문화쉐어센터 내/외부 사인물 제작,설치","amount":4100000,"owner":"조민","reviewer":"변기식","reviewDate":"2026-03-05","sendDate":"2026-03-05","status":"won","linkedProj":"P2026-영업-10","note":"4월말까지 완료필요"},{"id":"Q26-1007","recvDate":"2026-01-16","client":"한국이미지시스템","name":"사인물 제작/설치문의","scope":"연산동 현장 사인물 제작,설치","amount":1590000,"owner":"송성호","reviewer":"변기식","reviewDate":"2026-01-16","sendDate":"2025-01-16","status":"quoting"},{"id":"Q26-1008","recvDate":"2026-01-27","client":"부산디자인진흥원","name":"우수공공디자인제작물설치","scope":"제작완료품 진흥원 앞 설치","amount":0,"owner":"조민","reviewer":"변기식","reviewDate":"2026-01-26","sendDate":"2025-01-27","status":"quoting","note":"[금액]예산협의 중"},{"id":"Q26-1009","recvDate":"2026-01-23","client":"대동대학교","name":"평생교육원옥탑철거견적","scope":"흥광기획견적받음","amount":56130000,"owner":"조정헌","reviewDate":"2026-01-26","sendDate":"2026-01-26","status":"quoting","note":"이사장결재대기"},{"id":"Q26-1010","recvDate":"2026-01-23","client":"대동대학교","name":"셔틀버스랩핑","scope":"버스2대철거/시공","amount":9000000,"owner":"조정헌","reviewDate":"2026-01-26","sendDate":"2026-01-26","status":"quoting","note":"이사장결재대기"},{"id":"Q26-1011","recvDate":"2026-01-28","client":"중앙해사","name":"아크릴15t1500*2500 견적","scope":"종로아크릴2000*3000보유","amount":1600000,"owner":"조정헌","reviewDate":"2026-01-28","status":"quoting"},{"id":"Q26-1012","recvDate":"2026-01-28","client":"아난티 오시리아","name":"필름시공문의","scope":"총 3가지 건 문의 중","amount":0,"owner":"조정호","reviewDate":"2026-02-02","sendDate":"2026-02-02","status":"quoting"},{"id":"Q26-1013","recvDate":"2026-01-28","client":"(주) 키예노","name":"한샘내부시공","scope":"아크릴공사 문의","amount":4200000,"owner":"조정호","reviewDate":"2026-01-29","sendDate":"2026-01-29","status":"quoting"},{"id":"Q26-1014","recvDate":"2026-01-27","client":"금정구청","scope":"금정산 둘레길 안내판 제작 사업관련","amount":4080000,"owner":"송성호","reviewDate":"2026-01-27","sendDate":"2026-01-28","status":"quoting"},{"id":"Q26-1015","recvDate":"2026-01-28","client":"금정구청","name":"안내판 제작문의","scope":"범어사 인근 안내판 제작 사업관련","amount":37950000,"owner":"송성호","reviewer":"변기식","reviewDate":"2026-01-28","sendDate":"2026-01-28","status":"quoting","note":"담당자 변경 등으로 물량 증가 / 9월 예상"},{"id":"Q26-1016","recvDate":"2026-01-28","client":"영도구청","name":"문화관광과 보수 문의","scope":"영도크루즈 터미널 내  안내판 신규제작","amount":17820000,"owner":"송성호","reviewer":"변기식","reviewDate":"2026-01-28","sendDate":"2026-01-28","status":"won","note":"동판 설치 8월 요청"},{"id":"Q26-1017","recvDate":"2026-01-14","client":"서구청","name":"문화관광과 안내판 문의","scope":"B형 관광안내판 제작","amount":3970000,"owner":"송성호","reviewDate":"2026-00-15","sendDate":"2026-01-16","status":"quoting"},{"id":"Q26-1018","recvDate":"2026-02-06","client":"서구청 창조도시과","name":"안내판 신설문의","scope":"소망계단 SUS 안내판","amount":7766000,"owner":"변기식","reviewer":"변기식","reviewDate":"2026-02-09","sendDate":"2026-04-06","status":"won","lostReason":"공사완료"},{"id":"Q26-1018","recvDate":"2026-02-03","client":"해랑돼지국밥","name":"채널간판외","scope":"채널간판/파티조명외","amount":3100000,"owner":"조정헌","reviewDate":"2026-02-02","sendDate":"2026-02-03","status":"won","linkedProj":"P2026-영업-09","note":"가격비교견적/지인서생간판집작업"},{"id":"Q26-1019","recvDate":"2026-02-06","client":"서구청 창조도시과","name":"안내판 신설문의","scope":"소망계단 일대 안내판 신설문의 ( 시안진행 중 )","amount":1998700,"owner":"변기식","reviewer":"변기식","reviewDate":"2026-02-09","sendDate":"2026-03-20","status":"won","linkedProj":"추가공사 27일 완료","note":"27일 작업완료 / 카드결제완료"},{"id":"Q26-1020","recvDate":"2026-02-06","client":"강서구청 관광전력추진단","name":"안내판 신설문의","scope":"철새인공서식지 안내판 리뉴얼 공사","amount":8910000,"owner":"변기식","reviewer":"변기식","reviewDate":"2026-02-27","sendDate":"2026-03-06","status":"won","linkedProj":"P2026-영업-06","note":"30일 완료계제출"},{"id":"Q26-1021","recvDate":"2026-02-12","client":"서울 원양산업협회","name":"원양어업개척비 입간판","scope":"태종대-1 간절곳-1","amount":0,"owner":"조정헌","status":"quoting","lostReason":"010-2238-9448","note":"[금액]상담 진행 중 / 예산신청위한자료"},{"id":"Q26-1022","recvDate":"2026-02-13","client":"금정구청","name":"교통과 웨이파인딩 문의","scope":"부산대 앞 신설버스정류장 앞 바닥시트 작업문의","amount":0,"owner":"조민","status":"hold","note":"[금액]상담 진행 중 / 3월 말 작업필요"},{"id":"Q26-1023","recvDate":"2026-02-13","client":"충무동새벽시장","name":"미디어 월 철거 및 다찌테이블 제작 / 상인회관 리모델링 공사","scope":"1차 상인회관 및 화장실 리모델링 공사 완료","amount":58000000,"owner":"변기식","reviewer":"변기식","reviewDate":"2026-03-09","sendDate":"2026-03-11","status":"won","lostReason":"상인회교육관 사무실 및 화장실 리모델링 5월31일 완료, 미디어월 리뉴얼 PAINT 공사 6월14일 진행예정","linkedProj":"P2026-영업-12"},{"id":"Q26-1024","recvDate":"2026-02-20","client":"아이에스디자인","name":"시트컷팅 및 설치","scope":"시트컷팅 및 필름설치작업","amount":0,"owner":"조정호","status":"quoting","note":"[금액]상담 진행 중"},{"id":"Q26-1025","recvDate":"2026-02-23","client":"서구청 창조도시과","name":"철구조물 리뉴얼 공사","scope":"새뜰마을 환경정비 사업","amount":0,"owner":"변기식","status":"quoting","note":"[금액]상담 진행 중 / 2/4분기 공사예정"},{"id":"Q26-1026","recvDate":"2026-02-27","client":"㈜이스코","name":"선박창문용 마가드","scope":"당사보유분 단가견적","amount":0,"owner":"박규열","status":"lost","lostReason":"고객사 강화유리 사용","note":"[금액]단가 견적"},{"id":"Q26-1027","recvDate":"2026-02-27","client":"대동대학교","name":"교내게시판제작설치","scope":"갈바프레임/LED조명","amount":9380000,"owner":"조정헌","status":"quoting","note":"견적 진행중"},{"id":"Q26-1028","recvDate":"2026-03-09","client":"HD현대이엔티","name":"명예의전당 게시판용명찰","scope":"스텐부식/아크릴스카시","amount":0,"owner":"조정헌","status":"quoting","note":"견적 진행중"},{"id":"Q26-1029","recvDate":"2026-03-09","client":"동아대학교","name":"하단캠퍼스 주차장 DECAL","scope":"주차공간 PAINT DECAL","amount":0,"owner":"조민","status":"quoting","note":"3월중 작업요청"},{"id":"Q26-1030","recvDate":"2026-03-09","client":"카파디자인그룹","name":"사인물 문의","scope":"스카시,시트 및 실사출력","amount":459400,"owner":"송성호","status":"quoting","note":"견적 진행중"},{"id":"Q26-1031","recvDate":"2026-03-09","client":"㈜아트다솔","name":"방산모형시제품제작","scope":"SG305 4.5T220*120-5","amount":0,"owner":"조정헌","status":"quoting"},{"id":"Q26-1032","recvDate":"2026-03-11","client":"디자인 내일","name":"부산시 올리브마켓 마켓현판","scope":"아크릴레이져 현판","amount":10945000,"owner":"조민","reviewer":"변기식","status":"won","note":"설치완료"},{"id":"Q26-1033","recvDate":"2026-03-12","client":"낙동강관리본부","name":"삼락생태공원 안내판","scope":"기존노후 안내판 철거 후 신규제작 설치","amount":50000000,"owner":"변기식","reviewer":"변기식","sendDate":"2026-06-01","status":"won","note":"MAS발주 완료 - 정산필요"},{"id":"Q26-1034","recvDate":"2026-03-12","client":"장덕풍천장어","name":"매장 내/외부 사인물 문의","scope":"각 매장용 실사출력물,제작물 제작 문의","amount":0,"owner":"조민 (김동하)","status":"quoting","note":"[금액]지속 접수 중"},{"id":"Q26-1035","recvDate":"2026-03-19","client":"낙동강관리본부","name":"화명생태공원","scope":"게이트볼장 편의시설 개선사항","amount":0,"owner":"송성호","reviewer":"송성호","reviewDate":"2026-03-27","status":"won","linkedProj":"P2026-영업-11","note":"추가공사협의 중"},{"id":"Q26-1036","recvDate":"2026-03-23","client":"부산해양자연사박물관","name":"내부사인물교체","scope":"안내데스크 및 내부 표찰 교체","amount":0,"owner":"조민","reviewer":"조민","status":"won","linkedProj":"P2026-영업-16","note":"5/11 작업완료"},{"id":"Q26-1037","recvDate":"2026-03-27","client":"부산상공회의소","name":"상공회의소 건물 간판제작/설치","scope":"건물 외벽 신규간판 제작/설치 공사 건","amount":46036100,"owner":"변기식","reviewer":"변기식","reviewDate":"2026-03-27","sendDate":"2026-03-27","status":"quoting","note":"입찰 예정 진행 중"},{"id":"Q26-1038","recvDate":"2026-04-06","client":"버스운송사업조합","name":"포토존조형물 제작 문의 - 7월 초 포켓몬 시트 부착작업필요","scope":"시트부착-철거 공사 3개소/ 포토존디자인-작업 3개소 작업 필요","amount":0,"owner":"조민","status":"won","note":"시트설치완료"},{"id":"Q26-1039","recvDate":"2026-04-03","client":"아난티코브","name":"외부용 썬팅필름작업","scope":"호텔동 썬팅필름 시공","amount":12700000,"owner":"조정호","reviewDate":"2026-04-03","sendDate":"2026-04-03","status":"quoting"},{"id":"Q26-1040","recvDate":"2026-04-20","client":"㈜지영디자인","name":"MR10 - 12.7T 견적 접수","scope":"난연가림막 문의 - 10T 투명 규격","amount":32357000,"owner":"조민","reviewDate":"2026-04-20","status":"lost","note":"고객사 예산 부족"},{"id":"Q26-1041","recvDate":"2026-04-20","client":"케이로드로보틱스㈜","name":"신규CI기반 사인물 전체교체","scope":"디담소개 건 - 신규로고로 공장 내 사인물 전량 교체","amount":0,"owner":"조민","status":"quoting","note":"이번 주 방문/미팅예정"},{"id":"Q26-1043","recvDate":"2026-04-24","client":"씨앤에스디자인","name":"태종대관광안내소 리모델링 내 전광판 제작/설치","scope":"외부용전광판제작","amount":28000000,"owner":"조민","reviewer":"조민","reviewDate":"2026-04-24","sendDate":"2026-04-24","status":"won","linkedProj":"P2026-영업-14","note":"고객사 검토 중"},{"id":"Q26-1044","recvDate":"2026-04-29","client":"김해경전철","name":"사상역사 내부 웨이파인딩","scope":"웨이파인딩 디자인/설치","amount":0,"status":"quoting","note":"27년 사업으로 미뤄 짐"},{"id":"Q26-1045","recvDate":"2026-04-30","client":"비앤그룹","name":"리브골프대회 홍보부스제작","scope":"홍보부스 제작/운영 문의","amount":53000000,"owner":"조민","status":"quoting"},{"id":"Q26-1046","recvDate":"2026-05-04","client":"낙동강관리본부","name":"맥도생태공원 내 안내판 제작","scope":"디자인안내판 제작/설치 문의","amount":0,"owner":"조민","reviewer":"변기식","reviewDate":"2026-04-24","sendDate":"2026-04-24","status":"quoting","note":"[금액]예산 협의 중 / 케이디자인웍스"},{"id":"Q26-1047","recvDate":"2026-05-08","client":"낙동강관리본부","name":"화명생태공원","scope":"천막설치","amount":5000000,"owner":"송성호","reviewer":"변기식","status":"won","linkedProj":"P2026-영업-17","note":"작업완료"},{"id":"Q26-1048","recvDate":"2026-05-11","client":"토탈건축디자인","name":"전광판견적문의","scope":"LCT내부 전광판문의","amount":52500000,"owner":"조민","reviewer":"조정헌","status":"quoting"},{"id":"Q26-1049","recvDate":"2026-05-15","client":"파인건축디자인","name":"울산신규현장 디지털사이니지","scope":"독립형65인치4대","amount":0,"owner":"조민","status":"lost","lostReason":"단가차이","note":"[금액]견적 중"},{"id":"Q26-1050","recvDate":"2026-05-15","client":"부산관광공사","name":"2026년 사업문의","scope":"보수도색,안내판제작/설치","amount":0,"owner":"조민","reviewer":"변기식","status":"won","note":"작업 완료 - 계약 중"},{"id":"Q26-1051","recvDate":"2026-01-10","client":"부산디자인진흥원 (이음)","name":"노포동 유니버셜 디자인 사인물 공사","scope":"사인물 제작/설치","amount":63636400,"owner":"조민","status":"won","linkedProj":"P2026-영업-07"},{"id":"Q26-1052","recvDate":"2026-05-26","client":"강서구청 관광전력추진단","name":"가덕도 노후 관광안내판 리뉴얼","scope":"사인물 제작/설치","amount":8030000,"owner":"변기식","reviewer":"송성호","reviewDate":"2026-05-24","sendDate":"2026-06-01","status":"won","note":"8월8일 작업완료"},{"id":"Q26-1053","recvDate":"2026-05-26","client":"비발디파크 케이블카","name":"케이블카 DOOR 창문 문의","scope":"P.C","amount":0,"owner":"변기식","reviewer":"서영주","sendDate":"2026-07-10","status":"quoting","note":"MR5E OR Exell D 생산일정 전청일 이사 확인 중"},{"id":"Q26-1054","recvDate":"2026-06-05","client":"부산교통공사","name":"내부용 바닥시트 문의","scope":"운영팀","amount":0,"owner":"조민","reviewer":"변기식","status":"quoting","note":"이번 주 미팅예정"},{"id":"Q26-1055","recvDate":"2026-06-05","client":"비에스엠테크","name":"투명PC하드코팅 - 납품문의","scope":"5T PC 하드코팅처리 후 납품문의 - 샘플적용","amount":220000,"owner":"조민","reviewer":"변기식","status":"won","note":"계산서발행,입금"},{"id":"Q26-1056","recvDate":"2026-06-15","client":"서구청 문화관광과","name":"관광안내판 B형 안내판 문의","scope":"B형 2개 발주 접수 예정","amount":0,"owner":"송성호","reviewer":"변기식","status":"quoting","note":"지도 시안 접수 중"},{"id":"Q26-1058","recvDate":"2026-06-25","client":"캠코","name":"도시경관개선 사업","scope":"서울 중랑구, 경기 군포시, 부산 동래구 공사","amount":44935000,"owner":"조민","reviewer":"변기식","status":"won","note":"정산 중"},{"id":"Q26-1059","recvDate":"2026-06-29","client":"금정구청","name":"부산대 인근 금연구역 바닥 웨이파인딩","scope":"부산대 인근 우범 지역 2곳 바닥작업","amount":600000,"owner":"변기식","reviewer":"변기식","status":"won","note":"루버샌딩시트"},{"id":"Q26-1060","recvDate":"2026-07-01","client":"사인이지","name":"교통공사낙찰건) 교대역 사인물 교체 공사","scope":"교대역 환승역 내부 사인물 교체","amount":22000000,"owner":"조민","reviewer":"변기식","status":"won","linkedProj":"P2026-영업-19","note":"시트 샘플 제작 및 협의 중"},{"id":"Q26-1061","recvDate":"2026-07-02","client":"빅터디자인","name":"라이즈혁신원 - 내부사인물교체","scope":"로고 및 원 명칭변경에 따른 작업","amount":0,"owner":"조민","reviewer":"조정호","status":"nego","note":"작업완료"},{"id":"Q26-1062","recvDate":"2026-07-08","client":"용평케이블카","name":"케이블카 P.C 교체","scope":"Exell D","amount":0,"owner":"변기식","status":"nego","note":"7월23일 현장 미팅"},{"id":"Q26-1063","recvDate":"2026-07-13","client":"부산교통공사","name":"해운대, 광안, 사상, 부산역","scope":"E/V 유도사인","amount":5000000,"owner":"조민","reviewer":"변기식","status":"won","note":"8월3일4일 작업완료"},{"id":"Q26-1064","recvDate":"2026-07-20","client":"여수케이블카","name":"4MILL 4ROLL","scope":"크리스탈용 요청","amount":2200000,"owner":"변기식","reviewer":"변기식","reviewDate":"2026-07-20","sendDate":"2026-07-20","status":"won","note":"1ROLL 긴급"},{"id":"Q26-1065","recvDate":"2026-07-20","client":"부산디자인진흥원","name":"2025우수공공디자인제작물설치","scope":"제작물 보수 및 현장설치","amount":4940000,"owner":"조민","reviewer":"변기식","reviewDate":"2026-07-20","sendDate":"2026-07-20","status":"won","note":"진흥원 앞 일부 설치"},{"id":"Q26-1066","recvDate":"2026-07-22","client":"수영구 청소년관","name":"웨이파인딩 설치 문의","scope":"바닥열융착 제작/설치","amount":3000000,"owner":"조민","reviewer":"변기식","reviewDate":"2026-07-22","status":"nego","note":"10월작업예정"},{"id":"Q26-1067","recvDate":"2026-07-31","client":"판커뮤니케이션","name":"지진 해일 대피안내판","scope":"알미늄판/고휘도실사","amount":46200000,"owner":"조정헌","reviewDate":"2026-07-31","status":"nego"},{"id":"Q26-1068","recvDate":"2026-07-31","client":"부산우유","name":"공장간판작업","scope":"비조명알루미늄채널","amount":6600000,"owner":"변기식","reviewer":"변기식","reviewDate":"2026-07-31","status":"won","note":"8월7일 작업완료"},{"id":"Q26-1069","recvDate":"2026-08-05","client":"낙동강관리공단","name":"대저생태공원 노후 안내판","scope":"화면교체 / 16개","amount":0,"owner":"변기식","reviewer":"변기식","status":"won"},{"id":"Q26-1070","recvDate":"2026-08-24","client":"부경대학교","name":"장영실과 내부 디지털사이니지","scope":"기존 간판 철거 후 디지털사이니지 신설","amount":0,"owner":"조민","status":"quoting"},{"id":"Q26-1071","recvDate":"2026-08-21","client":"디자인마인드플러스","name":"부산미술관 내부 디지털사이니지","scope":"엘리베이터 내부 디지털사이니지 신설","amount":1796000,"owner":"조민","status":"won"},{"id":"Q26-1072","recvDate":"2026-08-20","client":"디자인글꼴","name":"BNK캐릭터 조형물 제작 문의","scope":"BNK 캐릭터 FRP조형물 제작 협의","amount":0,"owner":"조민","status":"quoting"},{"id":"Q26-1073","recvDate":"2026-08-18","client":"인텔리안테크","name":"렉산 9034제품 문의","scope":"9034 제품 생산/납품 문의","amount":0,"owner":"조민","status":"quoting","note":"미국 현지샘플대응 불가로 다른 방안 찾는 중"},{"id":"Q26-1074","recvDate":"2026-08-31","client":"캠코","name":"공폐가 개선사업","scope":"부산4개소 - 동구,금정구, 북구, 사상구","amount":42916500,"owner":"조민","reviewer":"변기식","status":"nego","note":"케이디자인웍스"},{"id":"Q26-1075","recvDate":"2026-08-26","client":"부산교통공사","name":"추가 사인물 작업","amount":0,"owner":"변기식","status":"nego"},{"id":"Q26-1076","recvDate":"2026-08-24","client":"남해군청","name":"재난안내판 제작 문의","scope":"1500*1000 안내판 제작/납품","amount":19500000,"owner":"조민","status":"won","note":"9월 2주차 납품 예정"},{"id":"Q26-1077","recvDate":"2026-09-07","client":"부산남구청/문화관광과","name":"용호별빛공원","scope":"바닥도색작업 견적요청","amount":0,"owner":"변기식","status":"nego","note":"공원바닥 도면요청"},{"id":"Q26-1078","recvDate":"2026-09-07","client":"사인이지","name":"교통공사 달대형간판 문의","scope":"서면/교대역 달대형 간판 제작/설치 문의","amount":0,"owner":"조민","status":"quoting","note":"추석전까지 완료 필요"},{"id":"Q26-1079","recvDate":"2026-09-07","client":"남해군청","name":"관광안내판 제작문의","scope":"남해군청 표준 디자인 관광안내판 제작문의","amount":0,"owner":"조민","status":"quoting"}];
-const SEED_PROJECTS = [{"id":"P2026-영업-01","name":"금정구청 현수막게시대 제작/설치","company":"kdesign","client":"금정구청","contractType":"기타","contract":55632250,"start":"2026-01-05","end":"2026-02-16","status":"done"},{"id":"P2026-영업-02","name":"부산광역시 우수건축물명판 제작/설치","company":"koreapolymer","client":"빅터디자인스튜디오","contractType":"기타","contract":830000,"start":"2026-01-07","end":"2026-01-21","status":"done"},{"id":"P2026-영업-03","name":"대저생태공원놀이터보수작업","company":"koreapolymer","client":"낙동강관리본부","contractType":"기타","contract":4246000,"start":"2026-01-13","end":"2026-01-20","status":"done","fromQuote":"Q26-1002"},{"id":"P2026-영업-04","name":"감만부두 안내판 보수작업(철거및신설)","company":"koreapolymer","client":"부산항보안공사","contractType":"기타","contract":605000,"start":"2026-01-12","end":"2026-01-21","status":"done"},{"id":"P2026-영업-05","name":"대저생태공원과속방지턱설치","company":"koreapolymer","client":"낙동강관리본부","contractType":"기타","contract":3073400,"start":"2026-01-20","end":"2026-02-05","status":"done","fromQuote":"Q26-1002"},{"id":"P2026-영업-06","name":"신호동 철새인공서식지 안내판 정비 용역","company":"koreapolymer","client":"강서구청","contractType":"용역","contract":8460000,"start":"2026-01-29","end":"2026-03-02","status":"done","fromQuote":"Q26-1020"},{"id":"P2026-영업-07","name":"부산종합버스터미널 유니버설디자인 사인물 제작·설치 용역","company":"koreapolymer","client":"이음 (부산디자인진흥원)","contractType":"하도급","contract":70000000,"start":"2026-04-06","end":"2026-06-24","status":"ing","fromQuote":"Q26-1051"},{"id":"P2026-영업-08","name":"해운대 달맞이고개 대형현수막 제작/설치","company":"kdesign","client":"부산시청","contractType":"용역","contractNo":"R26TA01722974-00","contract":16698000,"start":"2026-04-13","end":"2026-09-09","status":"ing"},{"id":"P2026-영업-09","name":"소망계단 모노레일 안내 표지판 구입(설치)","company":"koreapolymer","client":"부산광역시 서구청","contractType":"물품","contract":7760000,"start":"2026-04-06","end":"2026-04-24","status":"ing","fromQuote":"Q26-1018"},{"id":"P2026-영업-10","name":"망미동 문화쉐어센터","company":"koreapolymer","client":"수영구청-디자인글꼴","contractType":"하도급","contract":4736930,"start":"2026-04-08","end":"2026-04-30","status":"done","fromQuote":"Q26-1006"},{"id":"P2026-영업-11","name":"화명생태공원 - 캐비넷제작","company":"koreapolymer","client":"낙동강관리본부","contractType":"물품","contract":3800000,"start":"2026-04-23","end":"2026-04-23","status":"done","fromQuote":"Q26-1035"},{"id":"P2026-영업-12","name":"충무동 새벽․해안시장(연합) 해안시장 커뮤니센터 리뉴얼 용역","company":"kdesign","client":"충무동 새벽,해안시장","contractType":"용역","contract":48000000,"start":"2026-04-17","end":"2026-08-31","status":"ing","fromQuote":"Q26-1023"},{"id":"P2026-영업-13","name":"충무동 새벽․해안시장(연합) 새벽시장 대형안내판 리뉴얼 용역","company":"koreapolymer","client":"충무동 새벽시장","contractType":"용역","contract":10000000,"start":"2026-04-17","end":"2026-06-30","status":"ing"},{"id":"P2026-영업-14","name":"태종대관광안내소전광판-사인물제작/설치공사","company":"koreapolymer","client":"씨에스디자인건축","contractType":"공사","contract":34269510,"start":"2026-05-25","end":"2026-06-24","status":"ing","fromQuote":"Q26-1043"},{"id":"P2026-영업-15","name":"2026년 상반기 지진 옥외대피장소 표지판 구입","company":"koreapolymer","client":"동래구 안전과","contractType":"물품","contractNo":"002182380-07","contract":2141000,"start":"2026-04-27","end":"2026-05-11","status":"done"},{"id":"P2026-영업-16","name":"부산해양자연사박물관사인물보수","company":"koreapolymer","client":"부산해양자연사박물관","contractType":"용역","contract":3357200,"start":"2026-04-09","end":"2026-05-20","status":"done","fromQuote":"Q26-1036"},{"id":"P2026-영업-17","name":"화명생태공원천막보수 공사 등","company":"koreapolymer","client":"낙동강관리본부","contractType":"물품","contract":11220000,"start":"2026-05-01","end":"2026-05-29","status":"done","fromQuote":"Q26-1047"},{"id":"P2026-영업-18","name":"왕피천케이블카 웨이파인딩공사","company":"koreapolymer","client":"거제케이블카","contractType":"물품","contract":5973000,"start":"2026-04-22","end":"2026-05-11","status":"done"},{"id":"P2026-영업-19","name":"교대역 환승안내표지 정비","company":"koreapolymer","client":"사인이지","contractType":"하도급","contract":24233000,"start":"2026-07-07","end":"2026-08-04","status":"ing","fromQuote":"Q26-1060"}];
+const SEED_QUOTES = [{"id":"Q25-1001","recvDate":"2025-10-27","client":"디자인 모두","name":"함안 박물관 내 웨이판인딩","scope":"바닥용실사/열융착작업","amount":1235000,"owner":"변기식","reviewDate":"2025-10-27","sendDate":"2025-10-27","status":"won","linkedProj":"P25-1027-1"},{"id":"Q25-1002","recvDate":"2025-10-29","client":"디아이디엔터","name":"3T포맥스+실사 출력작업 건","scope":"3T 포마트(백색)+실사작업요청","amount":900000,"owner":"송성호","reviewer":"조민","reviewDate":"2025-10-29","sendDate":"2025-10-29","status":"won"},{"id":"Q25-1003","recvDate":"2025-10-31","client":"금광기획","name":"광주송정시장바닥웨이파인딩","scope":"웨이파인딩(열융착)작업","amount":16000000,"owner":"조민","reviewer":"변기식","reviewDate":"2025-10-31","sendDate":"2025-10-31","status":"quoting"},{"id":"Q25-1004","recvDate":"2025-11-03","client":"동아화인텍","name":"1/2inch V-0 제품문의","scope":"렉산 V-0 제품문의","amount":1860000,"owner":"조민","reviewer":"허병일","reviewDate":"2025-11-03","sendDate":"2025-11-03","status":"won"},{"id":"Q25-1005","recvDate":"2025-11-06","client":"제부도케이블카","name":"NON SLIP & AL.STICKER 추가건","scope":"바닥 웨이파인딩 건","amount":1492000,"owner":"변기식","reviewDate":"2025-11-06","sendDate":"2025-11-06","status":"quoting"},{"id":"Q25-1006","recvDate":"2025-11-05","client":"한국소재융합연구원","name":"실내독립부스 설치","amount":20200000,"owner":"박규열","reviewDate":"2025-11-05","status":"quoting"},{"id":"Q25-1007","recvDate":"2025-11-05","client":"에스엠유통(양정인쇄)","name":"실사출력문의","scope":"실사+포마트 부착 작업","amount":36300,"owner":"송성호","status":"quoting"},{"id":"Q25-1008","recvDate":"2025-11-07","client":"주식회사 뷰산실업","name":"복층판 - 국산","amount":1668000,"owner":"서영주","status":"quoting"},{"id":"Q25-1009","recvDate":"2025-11-07","client":"일반손님","name":"MS코리아","amount":641000,"owner":"송성호","status":"quoting"},{"id":"Q25-1010","recvDate":"2025-11-07","client":"제부도케이블카","name":"크리스탈용 4MILL","amount":600000,"owner":"변기식","status":"quoting"},{"id":"Q25-1011","recvDate":"2025-11-17","client":"일반손님","name":"10T 투명 PC 가공문의","scope":"PC CNC가공 상담","amount":220000,"owner":"송성호","reviewDate":"2025-11-17","sendDate":"2025-11-17","status":"quoting"},{"id":"Q25-1012","recvDate":"2025-11-18","client":"(주) 키예노","name":"아크릴 재단","scope":"선반용 아크릴 재단","amount":2377000,"owner":"조정호","reviewer":"키예노 입찰에서 탈락되어 공사 진행 불가","status":"quoting"},{"id":"Q25-1013","recvDate":"2025-11-20","client":"디자인그룹예진","name":"현대포터2 랩핑실사","amount":1400000,"owner":"조정호","status":"quoting"},{"id":"Q25-1014","recvDate":"2025-11-21","client":"디아이디 엔터테인먼트","name":"실사출력/재단문의","amount":1264000,"owner":"조민","status":"lost","lostReason":"고객사 수주실패"},{"id":"Q25-1015","recvDate":"2025-11-21","client":"일반손님","name":"CNC작업","scope":"인조대리석 원판 5장 작업","amount":3000000,"owner":"송성호","status":"quoting"},{"id":"Q25-1016","recvDate":"2025-11-21","client":"한화하우징","name":"복층판 재단","scope":"10T복층판 재단","amount":1041000,"owner":"조정호","status":"quoting"},{"id":"Q25-1017","recvDate":"2025-11-24","client":"주식회사 아난티코브","name":"아난티코브 공용부 외부필름 철거 및 시공","amount":25580000,"owner":"조정호","reviewer":"26년 사업계획에 따른 예가 산정 견적","status":"quoting"},{"id":"Q25-1018","recvDate":"2025-11-24","client":"성창애스앤디","name":"블랙아웃필름 부착공사(경주)","scope":"외부윈도우필름부착","amount":11224000,"owner":"조민","sendDate":"2025-11-24","status":"lost","lostReason":"고객사 수주실패"},{"id":"Q25-1019","recvDate":"2025-11-25","client":"부산시설공단","name":"수영강변대로 보행육교 실리콘 공사 건","scope":"현장작업","amount":6303000,"owner":"조정호","status":"quoting"},{"id":"Q25-1020","recvDate":"2025-11-27","client":"라인테크닉스","name":"난연렉산PC문의","scope":"F2000 8T 1250*2050","amount":1330000,"owner":"조민","status":"lost","lostReason":"MOQ (3톤)충족불가"},{"id":"Q25-1021","recvDate":"2025-12-08","client":"블루스퀘어","name":"4.5T SG305OB 제품문의","scope":"4.5T 2000*4000 제품","amount":916000,"owner":"조민","sendDate":"2025-12-08","status":"won","note":"반룡출고"},{"id":"Q25-1022","recvDate":"2025-12-12","client":"MJ디자인","name":"양정교차로 실사출력","scope":"조명용실사출력제작/설치","amount":3745000,"owner":"조민","sendDate":"2025-12-12","status":"quoting"},{"id":"Q25-1023","recvDate":"2025-12-12","client":"MS","name":"경북의성 그린골판PC납품","scope":"1000*1300 1140장","amount":14706000,"owner":"조민","reviewer":"서영주","sendDate":"2025-12-12","status":"won","note":"1월 출고예정"},{"id":"Q25-1024","recvDate":"2025-12-16","client":"아난티","name":"열차단필름시공","scope":"아난티 남,여 사우나 열차단 필름 시공","amount":7632000,"owner":"조정호","status":"quoting"},{"id":"Q25-1025","recvDate":"2025-12-18","client":"킴스아트미술관","name":"실내사인물제작","scope":"2T포맥스출력물","amount":686000,"owner":"정민지","status":"quoting"},{"id":"Q25-1026","recvDate":"2025-12-19","client":"㈜ 동남엘리베이터","name":"투명스티커 실사","scope":"실사출력+멀티컷","amount":280000,"owner":"정민지","status":"quoting"},{"id":"Q25-1027","recvDate":"2025-12-22","client":"더빌드","name":"알마이트 재단/납품","scope":"영도현장 수직정원 내 알마이트 재단/납품","amount":1977600,"owner":"조민","status":"lost","lostReason":"고객사 사양  불일치","note":"신규업체 - 인터넷문의"},{"id":"Q25-1028","recvDate":"2025-12-23","client":"주식회사 화경","name":"PC재단 문의","scope":"롤PC 1440*3320","amount":1920000,"owner":"조정호","status":"quoting"},{"id":"Q25-1029","recvDate":"2025-12-29","client":"주식회사 아난티코브","name":"필름시공문의","scope":"공용구간 5층~11층 필름","amount":9800000,"owner":"조정호","status":"quoting"},{"id":"Q26-1001","recvDate":"2026-01-05","client":"낙동강관리본부","name":"삼락생태공원관리사무소 상담 진행","scope":"안내판 신규제작/설치","amount":4220000,"owner":"조민","reviewer":"변기식","reviewDate":"2026-01-05","status":"quoting","lostReason":"상반기 낙동강공원 전체 사업실시 예정"},{"id":"Q26-1002","recvDate":"2026-01-08","client":"낙동강관리본부","name":"대저생태공원 상담 진행","scope":"시설물보수 공사 문의","amount":0,"owner":"조민","reviewer":"조민","reviewDate":"2026-01-13","status":"won","linkedProj":"P2026-영업-03, P2026-영업-05","note":"[금액]2건 견적완료 / 추가공사1건 접수"},{"id":"Q26-1003","recvDate":"2026-01-12","client":"동해중학교","name":"학교시설물보수공사","scope":"전광판 및 간판교체작업 문의","amount":40500000,"owner":"조민","reviewer":"변기식","reviewDate":"2026-01-12","sendDate":"2025-01-19","status":"hold","lostReason":"고객사 예산부족으로 향후 사업 진행 예정"},{"id":"Q26-1004","recvDate":"2026-01-14","client":"㈜부영마린","name":"안내판 설치","scope":"공장 앞 안내판 설치작업 (자재 사급)","amount":260000,"owner":"윤준호","reviewer":"조민","reviewDate":"2026-01-14","sendDate":"2025-01-14","status":"lost","lostReason":"고객사 자체 작업으로 결정"},{"id":"Q26-1005","recvDate":"2026-01-15","client":"부산항보안공사","name":"안내판 제작문의","scope":"안내판 2건 제작/신설문의","amount":900000,"owner":"조민","reviewDate":"2026-01-15","sendDate":"2025-01-15","status":"quoting"},{"id":"Q26-1006","recvDate":"2026-01-15","client":"디자인글꼴","name":"사인물 제작/설치문의","scope":"망미문화쉐어센터 내/외부 사인물 제작,설치","amount":4100000,"owner":"조민","reviewer":"변기식","reviewDate":"2026-03-05","sendDate":"2026-03-05","status":"won","linkedProj":"P2026-영업-10","note":"4월말까지 완료필요"},{"id":"Q26-1007","recvDate":"2026-01-16","client":"한국이미지시스템","name":"사인물 제작/설치문의","scope":"연산동 현장 사인물 제작,설치","amount":1590000,"owner":"송성호","reviewer":"변기식","reviewDate":"2026-01-16","sendDate":"2025-01-16","status":"quoting"},{"id":"Q26-1008","recvDate":"2026-01-27","client":"부산디자인진흥원","name":"우수공공디자인제작물설치","scope":"제작완료품 진흥원 앞 설치","amount":0,"owner":"조민","reviewer":"변기식","reviewDate":"2026-01-26","sendDate":"2025-01-27","status":"quoting","note":"[금액]예산협의 중"},{"id":"Q26-1009","recvDate":"2026-01-23","client":"대동대학교","name":"평생교육원옥탑철거견적","scope":"흥광기획견적받음","amount":56130000,"owner":"조정헌","reviewDate":"2026-01-26","sendDate":"2026-01-26","status":"quoting","note":"이사장결재대기"},{"id":"Q26-1010","recvDate":"2026-01-23","client":"대동대학교","name":"셔틀버스랩핑","scope":"버스2대철거/시공","amount":9000000,"owner":"조정헌","reviewDate":"2026-01-26","sendDate":"2026-01-26","status":"quoting","note":"이사장결재대기"},{"id":"Q26-1011","recvDate":"2026-01-28","client":"중앙해사","name":"아크릴15t1500*2500 견적","scope":"종로아크릴2000*3000보유","amount":1600000,"owner":"조정헌","reviewDate":"2026-01-28","status":"quoting"},{"id":"Q26-1012","recvDate":"2026-01-28","client":"아난티 오시리아","name":"필름시공문의","scope":"총 3가지 건 문의 중","amount":0,"owner":"조정호","reviewDate":"2026-02-02","sendDate":"2026-02-02","status":"quoting"},{"id":"Q26-1013","recvDate":"2026-01-28","client":"(주) 키예노","name":"한샘내부시공","scope":"아크릴공사 문의","amount":4200000,"owner":"조정호","reviewDate":"2026-01-29","sendDate":"2026-01-29","status":"quoting"},{"id":"Q26-1014","recvDate":"2026-01-27","client":"금정구청","scope":"금정산 둘레길 안내판 제작 사업관련","amount":4080000,"owner":"송성호","reviewDate":"2026-01-27","sendDate":"2026-01-28","status":"quoting"},{"id":"Q26-1015","recvDate":"2026-01-28","client":"금정구청","name":"안내판 제작문의","scope":"범어사 인근 안내판 제작 사업관련","amount":37950000,"owner":"송성호","reviewer":"변기식","reviewDate":"2026-01-28","sendDate":"2026-01-28","status":"quoting","note":"담당자 변경 등으로 물량 증가 / 9월 예상"},{"id":"Q26-1016","recvDate":"2026-01-28","client":"영도구청","name":"문화관광과 보수 문의","scope":"영도크루즈 터미널 내  안내판 신규제작","amount":17820000,"owner":"송성호","reviewer":"변기식","reviewDate":"2026-01-28","sendDate":"2026-01-28","status":"won","note":"동판 설치 8월 요청"},{"id":"Q26-1017","recvDate":"2026-01-14","client":"서구청","name":"문화관광과 안내판 문의","scope":"B형 관광안내판 제작","amount":3970000,"owner":"송성호","reviewDate":"2026-00-15","sendDate":"2026-01-16","status":"quoting"},{"id":"Q26-1018","recvDate":"2026-02-06","client":"서구청 창조도시과","name":"안내판 신설문의","scope":"소망계단 SUS 안내판","amount":7766000,"owner":"변기식","reviewer":"변기식","reviewDate":"2026-02-09","sendDate":"2026-04-06","status":"won","lostReason":"공사완료","linkedProj":"P2026-영업-09"},{"id":"Q26-1042","recvDate":"2026-02-03","client":"해랑돼지국밥","name":"채널간판외","scope":"채널간판/파티조명외","amount":3100000,"owner":"조정헌","reviewDate":"2026-02-02","sendDate":"2026-02-03","status":"won","note":"가격비교견적/지인서생간판집작업"},{"id":"Q26-1019","recvDate":"2026-02-06","client":"서구청 창조도시과","name":"안내판 신설문의","scope":"소망계단 일대 안내판 신설문의 ( 시안진행 중 )","amount":1998700,"owner":"변기식","reviewer":"변기식","reviewDate":"2026-02-09","sendDate":"2026-03-20","status":"won","linkedProj":"추가공사 27일 완료","note":"27일 작업완료 / 카드결제완료"},{"id":"Q26-1020","recvDate":"2026-02-06","client":"강서구청 관광전력추진단","name":"안내판 신설문의","scope":"철새인공서식지 안내판 리뉴얼 공사","amount":8910000,"owner":"변기식","reviewer":"변기식","reviewDate":"2026-02-27","sendDate":"2026-03-06","status":"won","linkedProj":"P2026-영업-06","note":"30일 완료계제출"},{"id":"Q26-1021","recvDate":"2026-02-12","client":"서울 원양산업협회","name":"원양어업개척비 입간판","scope":"태종대-1 간절곳-1","amount":0,"owner":"조정헌","status":"quoting","lostReason":"010-2238-9448","note":"[금액]상담 진행 중 / 예산신청위한자료"},{"id":"Q26-1022","recvDate":"2026-02-13","client":"금정구청","name":"교통과 웨이파인딩 문의","scope":"부산대 앞 신설버스정류장 앞 바닥시트 작업문의","amount":0,"owner":"조민","status":"hold","note":"[금액]상담 진행 중 / 3월 말 작업필요"},{"id":"Q26-1023","recvDate":"2026-02-13","client":"충무동새벽시장","name":"미디어 월 철거 및 다찌테이블 제작 / 상인회관 리모델링 공사","scope":"1차 상인회관 및 화장실 리모델링 공사 완료","amount":58000000,"owner":"변기식","reviewer":"변기식","reviewDate":"2026-03-09","sendDate":"2026-03-11","status":"won","lostReason":"상인회교육관 사무실 및 화장실 리모델링 5월31일 완료, 미디어월 리뉴얼 PAINT 공사 6월14일 진행예정","linkedProj":"P2026-영업-12"},{"id":"Q26-1024","recvDate":"2026-02-20","client":"아이에스디자인","name":"시트컷팅 및 설치","scope":"시트컷팅 및 필름설치작업","amount":0,"owner":"조정호","status":"quoting","note":"[금액]상담 진행 중"},{"id":"Q26-1025","recvDate":"2026-02-23","client":"서구청 창조도시과","name":"철구조물 리뉴얼 공사","scope":"새뜰마을 환경정비 사업","amount":0,"owner":"변기식","status":"quoting","note":"[금액]상담 진행 중 / 2/4분기 공사예정"},{"id":"Q26-1026","recvDate":"2026-02-27","client":"㈜이스코","name":"선박창문용 마가드","scope":"당사보유분 단가견적","amount":0,"owner":"박규열","status":"lost","lostReason":"고객사 강화유리 사용","note":"[금액]단가 견적"},{"id":"Q26-1027","recvDate":"2026-02-27","client":"대동대학교","name":"교내게시판제작설치","scope":"갈바프레임/LED조명","amount":9380000,"owner":"조정헌","status":"quoting","note":"견적 진행중"},{"id":"Q26-1028","recvDate":"2026-03-09","client":"HD현대이엔티","name":"명예의전당 게시판용명찰","scope":"스텐부식/아크릴스카시","amount":0,"owner":"조정헌","status":"quoting","note":"견적 진행중"},{"id":"Q26-1029","recvDate":"2026-03-09","client":"동아대학교","name":"하단캠퍼스 주차장 DECAL","scope":"주차공간 PAINT DECAL","amount":0,"owner":"조민","status":"quoting","note":"3월중 작업요청"},{"id":"Q26-1030","recvDate":"2026-03-09","client":"카파디자인그룹","name":"사인물 문의","scope":"스카시,시트 및 실사출력","amount":459400,"owner":"송성호","status":"quoting","note":"견적 진행중"},{"id":"Q26-1031","recvDate":"2026-03-09","client":"㈜아트다솔","name":"방산모형시제품제작","scope":"SG305 4.5T220*120-5","amount":0,"owner":"조정헌","status":"quoting"},{"id":"Q26-1032","recvDate":"2026-03-11","client":"디자인 내일","name":"부산시 올리브마켓 마켓현판","scope":"아크릴레이져 현판","amount":10945000,"owner":"조민","reviewer":"변기식","status":"won","note":"설치완료"},{"id":"Q26-1033","recvDate":"2026-03-12","client":"낙동강관리본부","name":"삼락생태공원 안내판","scope":"기존노후 안내판 철거 후 신규제작 설치","amount":50000000,"owner":"변기식","reviewer":"변기식","sendDate":"2026-06-01","status":"won","note":"MAS발주 완료 - 정산필요"},{"id":"Q26-1034","recvDate":"2026-03-12","client":"장덕풍천장어","name":"매장 내/외부 사인물 문의","scope":"각 매장용 실사출력물,제작물 제작 문의","amount":0,"owner":"조민 (김동하)","status":"quoting","note":"[금액]지속 접수 중"},{"id":"Q26-1035","recvDate":"2026-03-19","client":"낙동강관리본부","name":"화명생태공원","scope":"게이트볼장 편의시설 개선사항","amount":0,"owner":"송성호","reviewer":"송성호","reviewDate":"2026-03-27","status":"won","linkedProj":"P2026-영업-11","note":"추가공사협의 중"},{"id":"Q26-1036","recvDate":"2026-03-23","client":"부산해양자연사박물관","name":"내부사인물교체","scope":"안내데스크 및 내부 표찰 교체","amount":0,"owner":"조민","reviewer":"조민","status":"won","linkedProj":"P2026-영업-16","note":"5/11 작업완료"},{"id":"Q26-1037","recvDate":"2026-03-27","client":"부산상공회의소","name":"상공회의소 건물 간판제작/설치","scope":"건물 외벽 신규간판 제작/설치 공사 건","amount":46036100,"owner":"변기식","reviewer":"변기식","reviewDate":"2026-03-27","sendDate":"2026-03-27","status":"quoting","note":"입찰 예정 진행 중"},{"id":"Q26-1038","recvDate":"2026-04-06","client":"버스운송사업조합","name":"포토존조형물 제작 문의 - 7월 초 포켓몬 시트 부착작업필요","scope":"시트부착-철거 공사 3개소/ 포토존디자인-작업 3개소 작업 필요","amount":0,"owner":"조민","status":"won","note":"시트설치완료"},{"id":"Q26-1039","recvDate":"2026-04-03","client":"아난티코브","name":"외부용 썬팅필름작업","scope":"호텔동 썬팅필름 시공","amount":12700000,"owner":"조정호","reviewDate":"2026-04-03","sendDate":"2026-04-03","status":"quoting"},{"id":"Q26-1040","recvDate":"2026-04-20","client":"㈜지영디자인","name":"MR10 - 12.7T 견적 접수","scope":"난연가림막 문의 - 10T 투명 규격","amount":32357000,"owner":"조민","reviewDate":"2026-04-20","status":"lost","note":"고객사 예산 부족"},{"id":"Q26-1041","recvDate":"2026-04-20","client":"케이로드로보틱스㈜","name":"신규CI기반 사인물 전체교체","scope":"디담소개 건 - 신규로고로 공장 내 사인물 전량 교체","amount":0,"owner":"조민","status":"quoting","note":"이번 주 방문/미팅예정"},{"id":"Q26-1043","recvDate":"2026-04-24","client":"씨앤에스디자인","name":"태종대관광안내소 리모델링 내 전광판 제작/설치","scope":"외부용전광판제작","amount":28000000,"owner":"조민","reviewer":"조민","reviewDate":"2026-04-24","sendDate":"2026-04-24","status":"won","linkedProj":"P2026-영업-14","note":"고객사 검토 중"},{"id":"Q26-1044","recvDate":"2026-04-29","client":"김해경전철","name":"사상역사 내부 웨이파인딩","scope":"웨이파인딩 디자인/설치","amount":0,"status":"quoting","note":"27년 사업으로 미뤄 짐"},{"id":"Q26-1045","recvDate":"2026-04-30","client":"비앤그룹","name":"리브골프대회 홍보부스제작","scope":"홍보부스 제작/운영 문의","amount":53000000,"owner":"조민","status":"quoting"},{"id":"Q26-1046","recvDate":"2026-05-04","client":"낙동강관리본부","name":"맥도생태공원 내 안내판 제작","scope":"디자인안내판 제작/설치 문의","amount":0,"owner":"조민","reviewer":"변기식","reviewDate":"2026-04-24","sendDate":"2026-04-24","status":"quoting","note":"[금액]예산 협의 중 / 케이디자인웍스"},{"id":"Q26-1047","recvDate":"2026-05-08","client":"낙동강관리본부","name":"화명생태공원","scope":"천막설치","amount":5000000,"owner":"송성호","reviewer":"변기식","status":"won","linkedProj":"P2026-영업-17","note":"작업완료"},{"id":"Q26-1048","recvDate":"2026-05-11","client":"토탈건축디자인","name":"전광판견적문의","scope":"LCT내부 전광판문의","amount":52500000,"owner":"조민","reviewer":"조정헌","status":"quoting"},{"id":"Q26-1049","recvDate":"2026-05-15","client":"파인건축디자인","name":"울산신규현장 디지털사이니지","scope":"독립형65인치4대","amount":0,"owner":"조민","status":"lost","lostReason":"단가차이","note":"[금액]견적 중"},{"id":"Q26-1050","recvDate":"2026-05-15","client":"부산관광공사","name":"2026년 사업문의","scope":"보수도색,안내판제작/설치","amount":0,"owner":"조민","reviewer":"변기식","status":"won","note":"작업 완료 - 계약 중"},{"id":"Q26-1051","recvDate":"2026-01-10","client":"부산디자인진흥원 (이음)","name":"노포동 유니버셜 디자인 사인물 공사","scope":"사인물 제작/설치","amount":63636400,"owner":"조민","status":"won","linkedProj":"P2026-영업-07"},{"id":"Q26-1052","recvDate":"2026-05-26","client":"강서구청 관광전력추진단","name":"가덕도 노후 관광안내판 리뉴얼","scope":"사인물 제작/설치","amount":8030000,"owner":"변기식","reviewer":"송성호","reviewDate":"2026-05-24","sendDate":"2026-06-01","status":"won","note":"8월8일 작업완료"},{"id":"Q26-1053","recvDate":"2026-05-26","client":"비발디파크 케이블카","name":"케이블카 DOOR 창문 문의","scope":"P.C","amount":0,"owner":"변기식","reviewer":"서영주","sendDate":"2026-07-10","status":"quoting","note":"MR5E OR Exell D 생산일정 전청일 이사 확인 중"},{"id":"Q26-1054","recvDate":"2026-06-05","client":"부산교통공사","name":"내부용 바닥시트 문의","scope":"운영팀","amount":0,"owner":"조민","reviewer":"변기식","status":"quoting","note":"이번 주 미팅예정"},{"id":"Q26-1055","recvDate":"2026-06-05","client":"비에스엠테크","name":"투명PC하드코팅 - 납품문의","scope":"5T PC 하드코팅처리 후 납품문의 - 샘플적용","amount":220000,"owner":"조민","reviewer":"변기식","status":"won","note":"계산서발행,입금"},{"id":"Q26-1056","recvDate":"2026-06-15","client":"서구청 문화관광과","name":"관광안내판 B형 안내판 문의","scope":"B형 2개 발주 접수 예정","amount":0,"owner":"송성호","reviewer":"변기식","status":"quoting","note":"지도 시안 접수 중"},{"id":"Q26-1058","recvDate":"2026-06-25","client":"캠코","name":"도시경관개선 사업","scope":"서울 중랑구, 경기 군포시, 부산 동래구 공사","amount":44935000,"owner":"조민","reviewer":"변기식","status":"won","note":"정산 중"},{"id":"Q26-1059","recvDate":"2026-06-29","client":"금정구청","name":"부산대 인근 금연구역 바닥 웨이파인딩","scope":"부산대 인근 우범 지역 2곳 바닥작업","amount":600000,"owner":"변기식","reviewer":"변기식","status":"won","note":"루버샌딩시트"},{"id":"Q26-1060","recvDate":"2026-07-01","client":"사인이지","name":"교통공사낙찰건) 교대역 사인물 교체 공사","scope":"교대역 환승역 내부 사인물 교체","amount":22000000,"owner":"조민","reviewer":"변기식","status":"won","linkedProj":"P2026-영업-19","note":"시트 샘플 제작 및 협의 중"},{"id":"Q26-1061","recvDate":"2026-07-02","client":"빅터디자인","name":"라이즈혁신원 - 내부사인물교체","scope":"로고 및 원 명칭변경에 따른 작업","amount":0,"owner":"조민","reviewer":"조정호","status":"nego","note":"작업완료"},{"id":"Q26-1062","recvDate":"2026-07-08","client":"용평케이블카","name":"케이블카 P.C 교체","scope":"Exell D","amount":0,"owner":"변기식","status":"nego","note":"7월23일 현장 미팅"},{"id":"Q26-1063","recvDate":"2026-07-13","client":"부산교통공사","name":"해운대, 광안, 사상, 부산역","scope":"E/V 유도사인","amount":5000000,"owner":"조민","reviewer":"변기식","status":"won","note":"8월3일4일 작업완료"},{"id":"Q26-1064","recvDate":"2026-07-20","client":"여수케이블카","name":"4MILL 4ROLL","scope":"크리스탈용 요청","amount":2200000,"owner":"변기식","reviewer":"변기식","reviewDate":"2026-07-20","sendDate":"2026-07-20","status":"won","note":"1ROLL 긴급"},{"id":"Q26-1065","recvDate":"2026-07-20","client":"부산디자인진흥원","name":"2025우수공공디자인제작물설치","scope":"제작물 보수 및 현장설치","amount":4940000,"owner":"조민","reviewer":"변기식","reviewDate":"2026-07-20","sendDate":"2026-07-20","status":"won","note":"진흥원 앞 일부 설치"},{"id":"Q26-1066","recvDate":"2026-07-22","client":"수영구 청소년관","name":"웨이파인딩 설치 문의","scope":"바닥열융착 제작/설치","amount":3000000,"owner":"조민","reviewer":"변기식","reviewDate":"2026-07-22","status":"nego","note":"10월작업예정"},{"id":"Q26-1067","recvDate":"2026-07-31","client":"판커뮤니케이션","name":"지진 해일 대피안내판","scope":"알미늄판/고휘도실사","amount":46200000,"owner":"조정헌","reviewDate":"2026-07-31","status":"nego"},{"id":"Q26-1068","recvDate":"2026-07-31","client":"부산우유","name":"공장간판작업","scope":"비조명알루미늄채널","amount":6600000,"owner":"변기식","reviewer":"변기식","reviewDate":"2026-07-31","status":"won","note":"8월7일 작업완료"},{"id":"Q26-1069","recvDate":"2026-08-05","client":"낙동강관리공단","name":"대저생태공원 노후 안내판","scope":"화면교체 / 16개","amount":0,"owner":"변기식","reviewer":"변기식","status":"won"},{"id":"Q26-1070","recvDate":"2026-08-24","client":"부경대학교","name":"장영실과 내부 디지털사이니지","scope":"기존 간판 철거 후 디지털사이니지 신설","amount":0,"owner":"조민","status":"quoting"},{"id":"Q26-1071","recvDate":"2026-08-21","client":"디자인마인드플러스","name":"부산미술관 내부 디지털사이니지","scope":"엘리베이터 내부 디지털사이니지 신설","amount":1796000,"owner":"조민","status":"won"},{"id":"Q26-1072","recvDate":"2026-08-20","client":"디자인글꼴","name":"BNK캐릭터 조형물 제작 문의","scope":"BNK 캐릭터 FRP조형물 제작 협의","amount":0,"owner":"조민","status":"quoting"},{"id":"Q26-1073","recvDate":"2026-08-18","client":"인텔리안테크","name":"렉산 9034제품 문의","scope":"9034 제품 생산/납품 문의","amount":0,"owner":"조민","status":"quoting","note":"미국 현지샘플대응 불가로 다른 방안 찾는 중"},{"id":"Q26-1074","recvDate":"2026-08-31","client":"캠코","name":"공폐가 개선사업","scope":"부산4개소 - 동구,금정구, 북구, 사상구","amount":42916500,"owner":"조민","reviewer":"변기식","status":"nego","note":"케이디자인웍스"},{"id":"Q26-1075","recvDate":"2026-08-26","client":"부산교통공사","name":"추가 사인물 작업","amount":0,"owner":"변기식","status":"nego"},{"id":"Q26-1076","recvDate":"2026-08-24","client":"남해군청","name":"재난안내판 제작 문의","scope":"1500*1000 안내판 제작/납품","amount":19500000,"owner":"조민","status":"won","note":"9월 2주차 납품 예정"},{"id":"Q26-1077","recvDate":"2026-09-07","client":"부산남구청/문화관광과","name":"용호별빛공원","scope":"바닥도색작업 견적요청","amount":0,"owner":"변기식","status":"nego","note":"공원바닥 도면요청"},{"id":"Q26-1078","recvDate":"2026-09-07","client":"사인이지","name":"교통공사 달대형간판 문의","scope":"서면/교대역 달대형 간판 제작/설치 문의","amount":0,"owner":"조민","status":"quoting","note":"추석전까지 완료 필요"},{"id":"Q26-1079","recvDate":"2026-09-07","client":"남해군청","name":"관광안내판 제작문의","scope":"남해군청 표준 디자인 관광안내판 제작문의","amount":0,"owner":"조민","status":"quoting"}];
+const SEED_PROJECTS = [{"id":"P2026-영업-01","name":"금정구청 현수막게시대 제작/설치","company":"kdesign","client":"금정구청","contractType":"기타","contract":55632250,"start":"2026-01-05","end":"2026-02-16","status":"done"},{"id":"P2026-영업-02","name":"부산광역시 우수건축물명판 제작/설치","company":"koreapolymer","client":"빅터디자인스튜디오","contractType":"기타","contract":830000,"start":"2026-01-07","end":"2026-01-21","status":"done"},{"id":"P2026-영업-03","name":"대저생태공원놀이터보수작업","company":"koreapolymer","client":"낙동강관리본부","contractType":"기타","contract":4246000,"start":"2026-01-13","end":"2026-01-20","status":"done","fromQuote":"Q26-1002","quoteOwner":"조민","salesOwner":"조민"},{"id":"P2026-영업-04","name":"감만부두 안내판 보수작업(철거및신설)","company":"koreapolymer","client":"부산항보안공사","contractType":"기타","contract":605000,"start":"2026-01-12","end":"2026-01-21","status":"done"},{"id":"P2026-영업-05","name":"대저생태공원과속방지턱설치","company":"koreapolymer","client":"낙동강관리본부","contractType":"기타","contract":3073400,"start":"2026-01-20","end":"2026-02-05","status":"done","fromQuote":"Q26-1002","quoteOwner":"조민","salesOwner":"조민"},{"id":"P2026-영업-06","name":"신호동 철새인공서식지 안내판 정비 용역","company":"koreapolymer","client":"강서구청","contractType":"용역","contract":8460000,"start":"2026-01-29","end":"2026-03-02","status":"done","fromQuote":"Q26-1020","quoteOwner":"변기식","salesOwner":"변기식"},{"id":"P2026-영업-07","name":"부산종합버스터미널 유니버설디자인 사인물 제작·설치 용역","company":"koreapolymer","client":"이음 (부산디자인진흥원)","contractType":"하도급","contract":70000000,"start":"2026-04-06","end":"2026-06-24","status":"ing","fromQuote":"Q26-1051","quoteOwner":"조민","salesOwner":"조민"},{"id":"P2026-영업-08","name":"해운대 달맞이고개 대형현수막 제작/설치","company":"kdesign","client":"부산시청","contractType":"용역","contractNo":"R26TA01722974-00","contract":16698000,"start":"2026-04-13","end":"2026-09-09","status":"ing"},{"id":"P2026-영업-09","name":"소망계단 모노레일 안내 표지판 구입(설치)","company":"koreapolymer","client":"부산광역시 서구청","contractType":"물품","contract":7760000,"start":"2026-04-06","end":"2026-04-24","status":"ing","fromQuote":"Q26-1018","quoteOwner":"변기식","salesOwner":"변기식"},{"id":"P2026-영업-10","name":"망미동 문화쉐어센터","company":"koreapolymer","client":"수영구청-디자인글꼴","contractType":"하도급","contract":4736930,"start":"2026-04-08","end":"2026-04-30","status":"done","fromQuote":"Q26-1006","quoteOwner":"조민","salesOwner":"조민"},{"id":"P2026-영업-11","name":"화명생태공원 - 캐비넷제작","company":"koreapolymer","client":"낙동강관리본부","contractType":"물품","contract":3800000,"start":"2026-04-23","end":"2026-04-23","status":"done","fromQuote":"Q26-1035","quoteOwner":"송성호","salesOwner":"송성호"},{"id":"P2026-영업-12","name":"충무동 새벽․해안시장(연합) 해안시장 커뮤니센터 리뉴얼 용역","company":"kdesign","client":"충무동 새벽,해안시장","contractType":"용역","contract":48000000,"start":"2026-04-17","end":"2026-08-31","status":"ing","fromQuote":"Q26-1023","quoteOwner":"변기식","salesOwner":"변기식"},{"id":"P2026-영업-13","name":"충무동 새벽․해안시장(연합) 새벽시장 대형안내판 리뉴얼 용역","company":"koreapolymer","client":"충무동 새벽시장","contractType":"용역","contract":10000000,"start":"2026-04-17","end":"2026-06-30","status":"ing"},{"id":"P2026-영업-14","name":"태종대관광안내소전광판-사인물제작/설치공사","company":"koreapolymer","client":"씨에스디자인건축","contractType":"공사","contract":34269510,"start":"2026-05-25","end":"2026-06-24","status":"ing","fromQuote":"Q26-1043","quoteOwner":"조민","salesOwner":"조민"},{"id":"P2026-영업-15","name":"2026년 상반기 지진 옥외대피장소 표지판 구입","company":"koreapolymer","client":"동래구 안전과","contractType":"물품","contractNo":"002182380-07","contract":2141000,"start":"2026-04-27","end":"2026-05-11","status":"done"},{"id":"P2026-영업-16","name":"부산해양자연사박물관사인물보수","company":"koreapolymer","client":"부산해양자연사박물관","contractType":"용역","contract":3357200,"start":"2026-04-09","end":"2026-05-20","status":"done","fromQuote":"Q26-1036","quoteOwner":"조민","salesOwner":"조민"},{"id":"P2026-영업-17","name":"화명생태공원천막보수 공사 등","company":"koreapolymer","client":"낙동강관리본부","contractType":"물품","contract":11220000,"start":"2026-05-01","end":"2026-05-29","status":"done","fromQuote":"Q26-1047","quoteOwner":"송성호","salesOwner":"송성호"},{"id":"P2026-영업-18","name":"왕피천케이블카 웨이파인딩공사","company":"koreapolymer","client":"거제케이블카","contractType":"물품","contract":5973000,"start":"2026-04-22","end":"2026-05-11","status":"done"},{"id":"P2026-영업-19","name":"교대역 환승안내표지 정비","company":"koreapolymer","client":"사인이지","contractType":"하도급","contract":24233000,"start":"2026-07-07","end":"2026-08-04","status":"ing","fromQuote":"Q26-1060","quoteOwner":"조민","salesOwner":"조민"}];
 const SEED_COSTS = [{"id":"POC2ZBY","projectId":"P2026-영업-01","item":"인건비 및 부대경비","material":0,"labor":600000,"overhead":500000},{"id":"POC3IN2","projectId":"P2026-영업-02","item":"아크릴가공 및 설치경비","material":120000,"labor":500000,"overhead":0},{"id":"POC5730","projectId":"P2026-영업-03","item":"가공비 및 인건비","material":1418000,"labor":120000,"overhead":600000},{"id":"POC7IZC","projectId":"P2026-영업-04","item":"실사비,인건비","material":120000,"labor":250000,"overhead":0},{"id":"POCDVU6","projectId":"P2026-영업-05","item":"현장작업비","material":0,"labor":700000,"overhead":0},{"id":"POCHJKM","projectId":"P2026-영업-06","item":"제작 및 현장인건비","material":1600000,"labor":250000,"overhead":0},{"id":"P104QDP","projectId":"P2026-영업-10","item":"가공실","material":237000,"labor":0,"overhead":0},{"id":"P105T2N","projectId":"P2026-영업-10","item":"실사실","material":130000,"labor":0,"overhead":0}];
 const SEED_HISTORY = [{"id":"POE5YBT","projectId":"P2026-영업-07","date":"2026-04-03","category":"요청사항","content":"1. 4/8(수)까지 사인물 공정표 작성 및 제출 : 4/7 제출 완료\n2. 설계변경 내용 4/14(화)까지 정리 및 보고 필요","attachments":[]},{"id":"P240SZ7","projectId":"P2026-영업-07","date":"2026-04-16","category":"현장이슈","content":"1. 달대형 수량변경\n2. 내부계단 내 사인물 추가(바닥시트) - 샘플 진흥원 전달 및 수량 확정 필요\n3. 문화대기공간 사인물 추가 (명칭,안내 등) - 4/17 현재 정리안됨\n4. 사인물 전체 수량 검토 필요\n5. 건축소장님과 의논해서 매표소 제작 일정 및 PC영업 필요\n[첨부: 1차변경내역-유니버셜디자인.png]","attachments":[]}];
 const SEED_PURCHASES = [{"id":"PURCH001","projectId":"P2026-영업-01","category":"외주가공","vendor":"남신테크","amount":37636363,"vat":3763636,"payDate":"2026-02-16T15:00:00.000Z","note":"현수막게시대 제작/시공"},{"id":"POC4HH2","projectId":"P2026-영업-03","category":"자재구매","vendor":"페인트구매","amount":50000,"vat":5000,"payDate":"2026-01-14"},{"id":"POC6OUI","projectId":"P2026-영업-04","category":"자재구매","vendor":"원우산업","amount":90000,"vat":9000,"payDate":"2026-01-16","note":"안내판,기둥구매"},{"id":"POCC4HG","projectId":"P2026-영업-05","category":"자재구매","vendor":"협동안전","amount":1480000,"vat":148000,"payDate":"2026-01-21","note":"과속방지턱"},{"id":"POCGCFU","projectId":"P2026-영업-06","category":"자재구매","vendor":"태양프레임","amount":2500000,"vat":250000,"payDate":"2026-03-10","note":"안내판제작"},{"id":"POCGT22","projectId":"P2026-영업-06","category":"외주가공","vendor":"중앙크레인","amount":300000,"vat":30000,"payDate":"2026-03-10"},{"id":"POCK5KK","projectId":"P2026-영업-08","category":"자재구매","vendor":"고니크레인(영크레인)","amount":600000,"vat":60000,"payDate":"2026-04-06"},{"id":"POCKNNU","projectId":"P2026-영업-08","category":"외주가공","vendor":"성공","amount":2151864,"vat":215186,"payDate":"2026-04-06","note":"현수막제작-1차"},{"id":"PWDX2IF","projectId":"P2026-영업-08","category":"외주가공","vendor":"바라던미디어","amount":450000,"vat":45000,"payDate":"2026-04-13"},{"id":"PGYA6F9","projectId":"P2026-영업-09","category":"외주가공","vendor":"태양후렘","amount":1050000,"vat":105000,"payDate":"2026-04-06","note":"안내판외주제작"},{"id":"PTK2IBY","projectId":"P2026-영업-10","category":"기타","vendor":"기타경비(식대)","amount":54900,"vat":5490,"payDate":"2026-04-30","note":"기타경비(식대)"},{"id":"P103AFW","projectId":"P2026-영업-10","category":"자재구매","vendor":"대우LED","amount":350000,"vat":35000,"payDate":"2026-04-30","note":"갈바게시판"},{"id":"P107CA3","projectId":"P2026-영업-10","category":"기타","vendor":"인건비","amount":900000,"vat":90000,"payDate":"2026-05-06"},{"id":"PLW0J66","projectId":"P2026-영업-07","category":"기타","vendor":"외주인건비및경비(바닥시트제거)","amount":653365,"vat":65337,"payDate":"2026-05-26","note":"인건비2인 및 기타경비"}];
 
-// Firebase가 완전히 비어있을 때만 최초 1회 시딩
+// 2026 조달 계약체결 목록 (나라장터 계약체결관리목록 2026-09-21 기준)
+const PROC_2026 = [{"name":"소망계단 모노레일 안내 표지판 구입(설치)","client":"부산광역시 서구","clientContact":"박혜령","contractType":"물품","contractNo":"R26TA01711053-00","bidNo":"","procureType":"수의계약","start":"2026-04-03","quote":""},{"name":"국제시장 일원 간판 디자인 개선·철거 사업 간판 제작·설치","client":"부산광역시 중구","clientContact":"이순남","contractType":"물품","contractNo":"R26TA01824823-01","bidNo":"R26BK01468667000","procureType":"수의계약","start":"2026-06-01","quote":""},{"name":"2026년 부산진구 관내 관광안내판 정비","client":"부산광역시 부산진구","clientContact":"한영경","contractType":"물품","contractNo":"R26TA01939955-00","bidNo":"","procureType":"수의계약","start":"2026-06-08","quote":""},{"name":"부산교통공사 캐릭터 조형물 제작·설치","client":"부산교통공사","clientContact":"정민지","contractType":"물품","contractNo":"R26TA01957175-00","bidNo":"R26BK01559805001","procureType":"낙찰","start":"2026-06-11","quote":""},{"name":"부산항 영도 크루즈터미널 관광수용태세 개선 물품 구입","client":"부산광역시 영도구","clientContact":"박선영","contractType":"물품","contractNo":"R26TA01983831-00","bidNo":"","procureType":"수의계약","start":"2026-06-19","quote":"Q26-1016"},{"name":"문화관광해설사의 집 외부 도색 공사","client":"부산관광공사","clientContact":"성혜지","contractType":"공사","contractNo":"R26TA01993050-00","bidNo":"","procureType":"수의계약","start":"2026-06-23","quote":"Q26-1050"},{"name":"2026년 상반기 관광안내시설물 정비 용역","client":"부산광역시 강서구","clientContact":"김민지","contractType":"용역","contractNo":"R26TA02005401-00","bidNo":"","procureType":"수의계약","start":"2026-06-25","quote":"Q26-1052"},{"name":"엘리베이터 안내표지 제작·구매","client":"부산교통공사","clientContact":"김채민","contractType":"물품","contractNo":"R26TA02110851-00","bidNo":"","procureType":"수의계약","start":"2026-07-31","quote":"Q26-1063"},{"name":"해양과학기술 산학연 협력센터 간판 제작 및 설치 용역","client":"재단법인부산테크노파크","clientContact":"권지영","contractType":"용역","contractNo":"R26TA02149518-00","bidNo":"","procureType":"수의계약","start":"2026-08-18","quote":""},{"name":"근대역사 100년 흔적길 보행환경 정비 용역","client":"부산광역시 영도구","clientContact":"박선영","contractType":"용역","contractNo":"R26TA02157631-00","bidNo":"","procureType":"수의계약","start":"2026-08-19","quote":""},{"name":"문화관광해설사의 집 안내표지판 제작 및 열차단 필름 시공","client":"부산관광공사","clientContact":"성혜지","contractType":"물품","contractNo":"R26TA02200808-00","bidNo":"","procureType":"수의계약","start":"2026-09-03","quote":"Q26-1050"},{"name":"2027년 간판개선사업 기초조사설계 용역","client":"경상남도 밀양시","clientContact":"김명희","contractType":"용역","contractNo":"R26TA02200502-00","bidNo":"","procureType":"수의계약","start":"2026-09-03","quote":""},{"name":"용두천 일원 경관개선사업 물품 제작·설치","client":"부산광역시 북구","clientContact":"정성욱","contractType":"물품","contractNo":"R26TA01463560-01","bidNo":"","procureType":"수의계약","start":"2026-09-04","quote":""},{"name":"우리동네 ESG센터 조성사업 건축공사","client":"부산광역시 연제구","clientContact":"손주하","contractType":"공사","contractNo":"R26TA02026191-02","bidNo":"R26BK01570172000","procureType":"낙찰","start":"2026-09-10","quote":""},{"name":"범어사 일원 노후 안내유도표지판 구입","client":"부산광역시 금정구","clientContact":"손정휘","contractType":"물품","contractNo":"R26TA02224751-00","bidNo":"","procureType":"수의계약","start":"2026-09-11","quote":"Q26-1015"}];
+
+// ════════════════════════════════════════════════════════
+//  초기화: 최초 시딩 + 데이터 개정(마이그레이션)
+//  · 모든 개정은 재실행해도 결과가 같도록(멱등) 작성
+// ════════════════════════════════════════════════════════
+const DATA_VERSION = 2;
+
 async function initData(){
   if(!db || !fbReady) return;
   try{
-    const snap = await db.ref('pm/_seeded').once('value');
-    if(snap.val() === true) return;   // 이미 시딩됨
-    const qs = await db.ref('pm/quotes').once('value');
-    if(qs.val()) { await db.ref('pm/_seeded').set(true); return; }
+    const seeded = (await db.ref('pm/_seeded').once('value')).val();
+    const hasQ = (await db.ref('pm/quotes').once('value')).val();
+    if(!seeded && !hasQ){
+      console.log('최초 데이터 시딩...');
+      CACHE.quotes=[];CACHE.projects=[];CACHE.purchases=[];CACHE.costs=[];CACHE.history=[];
+      await save(K.quote, SEED_QUOTES,   '시스템');
+      await save(K.proj,  SEED_PROJECTS, '시스템');
+      await save(K.purch, SEED_PURCHASES,'시스템');
+      await save(K.cost,  SEED_COSTS,    '시스템');
+      await save(K.hist,  SEED_HISTORY,  '시스템');
+    }
+    if(!seeded) await db.ref('pm/_seeded').set(true);
+    await runMigrations();
+  }catch(e){ console.error('초기화 실패', e); }
+}
 
-    console.log('최초 데이터 시딩 시작...');
-    save(K.quote, SEED_QUOTES);
-    save(K.proj,  SEED_PROJECTS);
-    save(K.purch, SEED_PURCHASES);
-    save(K.cost,  SEED_COSTS);
-    save(K.hist,  SEED_HISTORY);
-    await db.ref('pm/_seeded').set(true);
-    console.log('시딩 완료');
-  }catch(e){ console.error('시딩 실패', e); }
+async function _fresh(col){
+  const v = (await db.ref('pm/'+col).once('value')).val() || {};
+  CACHE[col] = Object.values(v);
+  return CACHE[col].map(x=>({...x}));
+}
+
+async function runMigrations(){
+  const cur = (await db.ref('pm/_dataVersion').once('value')).val() || 0;
+  if(cur >= DATA_VERSION) return;
+  console.log('데이터 개정 실행: v'+cur+' → v'+DATA_VERSION);
+  if(cur < 1) await migrateV1();
+  if(cur < 2) await migrateV2();
+  await db.ref('pm/_dataVersion').set(DATA_VERSION);
+  console.log('데이터 개정 완료');
+  renderAll();
+}
+
+// ── v1: 조형찬 정리 · 중복 견적번호 복구 · 견적자/최종계약자 채움 ──
+async function migrateV1(){
+  const quotes = await _fresh(K.quote);
+  const projs  = await _fresh(K.proj);
+
+  // ① 조형찬 → 조민 (당시 검토자)
+  quotes.forEach(q=>{ if(q.owner==='조형찬') q.owner='조민'; if(q.reviewer==='조형찬') q.reviewer='조민'; });
+
+  // ② Q26-1018 중복 복구: 해랑돼지국밥 건이 서구청 건을 덮어쓴 경우
+  const q18 = quotes.find(q=>q.id==='Q26-1018');
+  if(q18 && String(q18.client||'').indexOf('해랑')>=0){
+    let newId = 'Q26-1042';
+    if(quotes.some(q=>q.id===newId)){
+      let mx=1000; quotes.forEach(q=>{const m=String(q.id).match(/^Q26-(\d+)$/); if(m) mx=Math.max(mx,+m[1]);});
+      newId = 'Q26-'+(mx+1);
+    }
+    const moved = {...q18, id:newId}; delete moved.linkedProj;
+    quotes.push(moved);
+    const orig = SEED_QUOTES.find(q=>q.id==='Q26-1018' && String(q.client||'').indexOf('서구청')>=0);
+    const i = quotes.findIndex(q=>q.id==='Q26-1018');
+    if(orig) quotes[i] = {...orig};
+  }
+
+  // ③ 견적 연계된 프로젝트의 견적자/최종계약자 채움 (비어있을 때만)
+  const qById = {}; quotes.forEach(q=>qById[q.id]=q);
+  projs.forEach(p=>{
+    if(p.id==='P2026-영업-09' && (!p.fromQuote || p.quoteOwner==='조정헌')){
+      p.fromQuote='Q26-1018'; p.quoteOwner='변기식'; if(!p.salesOwner||p.salesOwner==='조정헌') p.salesOwner='변기식';
+    }
+    const q = qById[p.fromQuote];
+    if(q && q.owner){
+      if(!p.quoteOwner) p.quoteOwner = q.owner;
+      if(!p.salesOwner) p.salesOwner = q.owner;
+    }
+  });
+
+  await save(K.quote, quotes, '시스템');
+  await save(K.proj,  projs,  '시스템');
+}
+
+// ── v2: 2026 조달 계약 등록 (나라장터 계약체결목록) ──
+async function migrateV2(){
+  const quotes = await _fresh(K.quote);
+  const projs  = await _fresh(K.proj);
+  const nm = s => String(s||'').replace(/[\s·・\(\)\-\/,]/g,'');
+  const yr = 2026;
+  let mx = 0;
+  projs.forEach(p=>{ const m=String(p.id).match(/^P(\d{4})-영업-(\d+)$/); if(m && +m[1]===yr) mx=Math.max(mx,+m[2]); });
+
+  // 기존 소망계단 공사에 조달정보 보강
+  const sm = projs.find(p=>nm(p.name).indexOf('소망계단')>=0);
+  if(sm){
+    if(!sm.contractNo) sm.contractNo = 'R26TA01711053-00';
+    if(!sm.procureType) sm.procureType = '수의계약';
+    if(!sm.clientContact) sm.clientContact = '박혜령';
+  }
+
+  const linkQuote = (qid, pid) => {
+    const q = quotes.find(x=>x.id===qid); if(!q) return null;
+    const ex = String(q.linkedProj||'').split(',').map(s=>s.trim()).filter(Boolean);
+    if(ex.indexOf(pid)<0) ex.push(pid);
+    q.linkedProj = ex.join(', ');
+    if(q.status!=='done') q.status = 'won';
+    return q;
+  };
+
+  PROC_2026.forEach(c=>{
+    // 이미 등록된 계약은 건너뜀 (계약번호 또는 계약명 일치)
+    if(projs.some(p=>p.contractNo===c.contractNo || nm(p.name)===nm(c.name))) return;
+    const pid = 'P'+yr+'-영업-'+String(++mx).padStart(2,'0');
+    const q = c.quote ? linkQuote(c.quote, pid) : null;
+    projs.push({
+      id:pid, name:c.name, company:'koreapolymer',
+      client:c.client, clientContact:c.clientContact,
+      contractType:c.contractType, contractNo:c.contractNo,
+      bidNo:c.bidNo, procureType:c.procureType,
+      contract:0, start:c.start, end:'', status:'ing',
+      fromQuote:c.quote||'',
+      quoteOwner:q?(q.owner||''):'', salesOwner:q?(q.owner||''):''
+    });
+  });
+
+  await save(K.quote, quotes, '시스템');
+  await save(K.proj,  projs,  '시스템');
 }
 
 // ════════════════════════════════════════════════════════
@@ -891,17 +1045,18 @@ function renderDashboard(){
       <td style="font-size:11px">${p.client||'-'}</td>
       <td>${ctBadge(p.contractType)}</td>
       <td>${statusBadge(p.status)}</td>
-      <td style="text-align:right">${fmt(p.contract)}</td>
+      <td style="font-size:11px;font-weight:600;color:var(--navy)">${p.salesOwner||'-'}</td>
+      <td style="text-align:right">${Number(p.contract)>0?fmt(p.contract):'<span style="color:#A32D2D;font-size:11px">금액 미입력</span>'}</td>
       <td style="text-align:right">${fmt(spent)}</td>
       <td style="text-align:right">
-        <span class="profit-cell ${pc}">${rate}%</span>
+        <span class="profit-cell ${pc}">${Number(p.contract)>0?rate+'%':'-'}</span>
         <div class="profit-bar-bg"><div class="profit-bar-fill" style="width:${bar}%;background:${pBarColor(rate)}"></div></div>
       </td>
       <td style="font-size:11px;color:var(--text2)">${p.start||'-'} ~ ${p.end||'-'}</td>
     </tr>`;
   }).join('');
   document.getElementById('dashTable').innerHTML=`<table>
-    <thead><tr><th>코드/사업부</th><th>공사명</th><th>발주처</th><th>계약구분</th><th>상태</th><th style="text-align:right">계약금액(원)</th><th style="text-align:right">투입비용(원)</th><th style="text-align:right">이익률</th><th>기간</th></tr></thead>
+    <thead><tr><th>코드/사업부</th><th>공사명</th><th>발주처</th><th>계약구분</th><th>상태</th><th>최종계약자</th><th style="text-align:right">계약금액(원)</th><th style="text-align:right">투입비용(원)</th><th style="text-align:right">이익률</th><th>기간</th></tr></thead>
     <tbody>${rows}</tbody>
   </table>`;
 }
@@ -920,11 +1075,13 @@ function renderProjects(){
       <td style="font-size:11px">${p.client||'-'}</td>
       <td><span style="font-size:10px;color:var(--text2)">${coLabel(p.company)}</span></td>
       <td>${ctBadge(p.contractType)}</td>
-      <td style="font-size:10px;color:var(--text2)">${p.contractNo||'-'}</td>
+      <td style="font-size:10px;color:var(--text2)">${p.contractNo||'-'}${p.procureType?'<br><span class="badge '+(p.procureType==='낙찰'?'badge-won':'badge-quoting')+'" style="font-size:9px">'+p.procureType+'</span>':''}</td>
       <td>${statusBadge(p.status)}</td>
-      <td style="text-align:right">${fmt(p.contract)}</td>
+      <td style="font-size:11px">${p.quoteOwner||'<span style="color:#A32D2D">미지정</span>'}</td>
+      <td style="font-size:11px;font-weight:600;color:var(--navy)">${p.salesOwner||'<span style="color:#A32D2D;font-weight:400">미지정</span>'}</td>
+      <td style="text-align:right">${Number(p.contract)>0?fmt(p.contract):'<span style="color:#A32D2D;font-size:11px">금액 미입력</span>'}</td>
       <td style="text-align:right">${fmt(spent)}</td>
-      <td style="text-align:right"><span class="profit-cell ${pc}">${rate}%</span></td>
+      <td style="text-align:right">${Number(p.contract)>0?'<span class="profit-cell '+pc+'">'+rate+'%</span>':'-'}</td>
       <td style="font-size:11px">${p.start||'-'} ~ ${p.end||'-'}</td>
       <td>
         <button class="btn sm" onclick="openModal('project','${p.id}')">편집</button>
@@ -933,7 +1090,7 @@ function renderProjects(){
     </tr>`;
   }).join('');
   document.getElementById('projectTable').innerHTML=`<table>
-    <thead><tr><th>코드</th><th>공사명</th><th>발주처</th><th>사업부</th><th>계약구분</th><th>계약번호</th><th>상태</th><th style="text-align:right">계약금액</th><th style="text-align:right">투입비용</th><th style="text-align:right">이익률</th><th>기간</th><th>관리</th></tr></thead>
+    <thead><tr><th>코드</th><th>공사명</th><th>발주처</th><th>사업부</th><th>계약구분</th><th>계약번호</th><th>상태</th><th>견적자</th><th>최종계약자</th><th style="text-align:right">계약금액</th><th style="text-align:right">투입비용</th><th style="text-align:right">이익률</th><th>기간</th><th>관리</th></tr></thead>
     <tbody>${rows}</tbody>
   </table>`;
 }
@@ -1094,7 +1251,7 @@ function openModal(type, editId){
     html=`<div class="modal">
       <div class="modal-title">${e?'프로젝트 편집':'새 프로젝트 등록'}</div>
       <div class="form-grid">
-        <div class="form-row"><label>프로젝트 코드</label><input id="f_id" value="${e?e.id:''}" placeholder="P2025-001" ${e?'readonly':''}></div>
+        <div class="form-row"><label>프로젝트 코드</label><input id="f_id" value="${e?e.id:nextProjId()}" ${e?'readonly style="background:var(--surface2)"':''}></div>
         <div class="form-row"><label>사업부</label><select id="f_co">
           <option value="koreapolymer" ${e&&e.company==='koreapolymer'?'selected':''}>고려폴리머</option>
           <option value="kdesign" ${e&&e.company==='kdesign'?'selected':''}>케이디자인웍스</option>
@@ -1113,6 +1270,22 @@ function openModal(type, editId){
         <div class="form-row"><label>계약번호 (선택)</label><input id="f_cno" value="${e?e.contractNo||'':''}" placeholder="계약번호 또는 공문번호"></div>
       </div>
       <div class="form-row"><label>계약금액 (원, 부가세 포함)</label><input id="f_contract" type="number" value="${e?e.contract:''}" placeholder="48170000"></div>
+      <div class="form-grid">
+        <div class="form-row"><label>견적자 <span style="color:#A32D2D">*</span></label>
+          <input id="f_qowner2" list="staffList" value="${e?(e.quoteOwner||''):''}" placeholder="견적 작성자"></div>
+        <div class="form-row"><label>최종계약자 (책임 영업자) <span style="color:#A32D2D">*</span></label>
+          <input id="f_sowner" list="staffList" value="${e?(e.salesOwner||ME):ME}" placeholder="계약 책임자"></div>
+      </div>
+      <div class="form-grid">
+        <div class="form-row"><label>조달 계약방식</label><select id="f_ptype">
+          <option value="" ${!e||!e.procureType?'selected':''}>해당없음 (민간)</option>
+          <option value="수의계약" ${e&&e.procureType==='수의계약'?'selected':''}>수의계약</option>
+          <option value="낙찰" ${e&&e.procureType==='낙찰'?'selected':''}>낙찰</option>
+        </select></div>
+        <div class="form-row"><label>입찰공고번호 (낙찰 시)</label><input id="f_bidno" value="${e?(e.bidNo||''):''}" placeholder="R26BK..."></div>
+      </div>
+      <div class="form-row"><label>발주기관 담당자</label><input id="f_ccontact" value="${e?(e.clientContact||''):''}" placeholder="수요기관 계약담당자"></div>
+      <datalist id="staffList">${STAFF.map(s=>'<option value="'+s+'">').join('')}</datalist>
       <div class="form-grid">
         <div class="form-row"><label>착공일</label><input id="f_start" type="date" value="${e?e.start:''}"></div>
         <div class="form-row"><label>준공일</label><input id="f_end" type="date" value="${e?e.end:''}"></div>
@@ -1230,7 +1403,11 @@ function saveProj(editId){
   const id=document.getElementById('f_id').value.trim();
   const name=document.getElementById('f_name').value.trim();
   if(!id||!name){alert('코드와 공사명은 필수입니다.');return;}
+  const qOwner = document.getElementById('f_qowner2').value.trim();
+  const sOwner = document.getElementById('f_sowner').value.trim();
+  if(!qOwner || !sOwner){ alert('견적자와 최종계약자는 반드시 입력해야 합니다.\n(책임 소재 명확화를 위한 필수 항목입니다)'); return; }
   const obj={id,name,
+    quoteOwner:qOwner, salesOwner:sOwner,
     company:document.getElementById('f_co').value,
     client:document.getElementById('f_client').value.trim(),
     contractType:document.getElementById('f_ctype').value,
@@ -1238,9 +1415,12 @@ function saveProj(editId){
     contract:Number(document.getElementById('f_contract').value||0),
     start:document.getElementById('f_start').value,
     end:document.getElementById('f_end').value,
-    status:document.getElementById('f_status').value};
+    status:document.getElementById('f_status').value,
+    procureType:document.getElementById('f_ptype').value,
+    bidNo:document.getElementById('f_bidno').value.trim(),
+    clientContact:document.getElementById('f_ccontact').value.trim()};
   let data=load(K.proj);
-  if(editId) data=data.map(x=>x.id===editId?obj:x);
+  if(editId) data=data.map(x=>x.id===editId?{...x,...obj}:x);   // 견적연계 등 기존 필드 보존
   else{if(data.find(x=>x.id===id)){alert('이미 존재하는 코드입니다.');return;}data.push(obj);}
   _pmSave(K.proj,data);closeModal();renderAll();
 }
@@ -1723,7 +1903,7 @@ function exportExcel(){
   // 시트2: 수익분석
   const aoa3=[];
   aoa3.push([{v:'프로젝트별 수익 분석',t:'s',s:{fill:{patternType:'solid',...navyFill},font:{bold:true,color:{rgb:'FFFFFF'},sz:13},alignment:ctr}},'','','','','','','','']);
-  aoa3.push(['NO','코드','공사명','사업부','계약구분','계약금액','투입비용','이익금액','이익률(%)'].map(h=>({v:h,t:'s',s:{fill:{patternType:'solid',...blueFill},font:hdrFont,alignment:ctr,border:thinBorder}})));
+  aoa3.push(['NO','코드','공사명','사업부','계약구분','견적자','최종계약자','계약금액','투입비용','이익금액','이익률(%)'].map(h=>({v:h,t:'s',s:{fill:{patternType:'solid',...blueFill},font:hdrFont,alignment:ctr,border:thinBorder}})));
   projs.forEach((p,i)=>{
     const ps=purch.filter(x=>x.projectId===p.id);
     const cs=costs.filter(x=>x.projectId===p.id);
@@ -1740,6 +1920,8 @@ function exportExcel(){
       {v:p.name,t:'s',s:{fill:{patternType:'solid',...bgFill},font:normFont,alignment:lft,border:thinBorder}},
       {v:coMap[p.company]||p.company,t:'s',s:{fill:{patternType:'solid',...bgFill},font:normFont,alignment:ctr,border:thinBorder}},
       {v:p.contractType||'',t:'s',s:{fill:{patternType:'solid',...bgFill},font:normFont,alignment:ctr,border:thinBorder}},
+      {v:p.quoteOwner||'',t:'s',s:{fill:{patternType:'solid',...bgFill},font:normFont,alignment:ctr,border:thinBorder}},
+      {v:p.salesOwner||'',t:'s',s:{fill:{patternType:'solid',...bgFill},font:{bold:true,name:'맑은 고딕',sz:9},alignment:ctr,border:thinBorder}},
       {v:contract,t:'n',s:{fill:{patternType:'solid',...bgFill},font:normFont,alignment:rgt,border:thinBorder,numFmt:'#,##0'}},
       {v:spent||0,t:'n',s:{fill:{patternType:'solid',...bgFill},font:normFont,alignment:rgt,border:thinBorder,numFmt:'#,##0'}},
       {v:profit,t:'n',s:{fill:{patternType:'solid',fgColor:{rgb:rBg}},font:{bold:true,color:{rgb:rFt},name:'맑은 고딕',sz:9},alignment:rgt,border:thinBorder,numFmt:'#,##0'}},
@@ -1747,8 +1929,8 @@ function exportExcel(){
     ]);
   });
   const ws3=XLSX.utils.aoa_to_sheet(aoa3);
-  ws3['!cols']=[{wch:5},{wch:12},{wch:30},{wch:14},{wch:8},{wch:16},{wch:16},{wch:16},{wch:10}];
-  ws3['!merges']=[{s:{r:0,c:0},e:{r:0,c:8}}];
+  ws3['!cols']=[{wch:5},{wch:15},{wch:30},{wch:14},{wch:8},{wch:9},{wch:11},{wch:16},{wch:16},{wch:16},{wch:10}];
+  ws3['!merges']=[{s:{r:0,c:0},e:{r:0,c:10}}];
   XLSX.utils.book_append_sheet(WB,ws3,'수익분석');
 
 
@@ -1902,8 +2084,6 @@ function importData(input){
   }
   initFirebase();
   renderAll();
-  // Firebase 연결 후 시딩 시도
-  setTimeout(()=>initData(), 2500);
 })();
 
 </script>
