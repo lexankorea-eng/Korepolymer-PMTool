@@ -194,6 +194,48 @@ tr.yr24:hover td{background:#FFF9D0}
 @keyframes livePulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(.8)}}
 .live-status.off .live-pulse{background:#A32D2D;animation:none}
 .edit-by{font-size:9px;color:var(--text3);font-style:italic}
+
+/* ── 주간회의 보고서 ─────────────────── */
+.wk-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.wk-period{font-size:13px;font-weight:700;color:var(--navy);padding:0 6px}
+.wk-doc{background:#fff;border-radius:var(--radius-lg);box-shadow:var(--shadow);padding:22px 26px;color:#1E293B}
+.wk-head{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid #1B3A5C;padding-bottom:6px;margin-bottom:10px}
+.wk-title{font-size:16px;font-weight:700;color:#1B3A5C}
+.wk-meta{font-size:10px;color:#64748B;text-align:right;line-height:1.5}
+.wk-kpi{display:table;width:100%;table-layout:fixed;border-collapse:separate;border-spacing:5px 0;margin:0 -5px 10px;width:calc(100% + 10px)}
+.wk-kpi div{display:table-cell;border:1px solid #CBD5E1;border-radius:6px;padding:6px 4px;text-align:center;vertical-align:middle}
+.wk-kpi b{display:block;font-size:15px;color:#1B3A5C;line-height:1.2}
+.wk-kpi span{font-size:9.5px;color:#64748B}
+.wk-kpi small{display:block;font-size:9px;color:#94A3B8}
+.wk-h{font-size:11.5px;font-weight:700;color:#1B3A5C;margin:12px 0 5px;padding-left:6px;border-left:3px solid #1B3A5C}
+.wk-h em{font-style:normal;font-weight:400;color:#64748B;font-size:10px;margin-left:4px}
+.wk-t{width:100%;border-collapse:collapse;font-size:10px}
+.wk-t th{background:#EEF2F7;color:#334155;font-weight:600;padding:4px 5px;border:1px solid #CBD5E1;text-align:center;white-space:nowrap}
+.wk-t td{padding:3px 5px;border:1px solid #E2E8F0;vertical-align:top}
+.wk-t td.r{text-align:right;white-space:nowrap}.wk-t td.c{text-align:center;white-space:nowrap}
+.wk-t tr:hover td{background:transparent}
+.wk-none{font-size:10px;color:#94A3B8;padding:4px 6px}
+.wk-alert{font-size:10px;line-height:1.6}
+.wk-alert li{margin:0 0 2px 16px}
+.wk-alert b{color:#A32D2D}
+.wk-red{color:#A32D2D;font-weight:600}.wk-org{color:#B45309;font-weight:600}.wk-grn{color:#3B6D11;font-weight:600}
+.wk-memo{border:1px solid #CBD5E1;border-radius:6px;min-height:70px;padding:6px 8px;font-size:10px;color:#94A3B8}
+.wk-2col{display:table;width:100%;table-layout:fixed}
+.wk-2col > div{display:table-cell;vertical-align:top;width:50%}
+.wk-2col > div:first-child{padding-right:6px}.wk-2col > div:last-child{padding-left:6px}
+@media print{
+  @page{size:A4 portrait;margin:11mm 10mm}
+  body{background:#fff!important;font-size:10px}
+  .lock-overlay,.modal-overlay{display:none!important}
+  .wrap{max-width:none;padding:0}
+  .wrap > :not(#sec-weekly){display:none!important}
+  #sec-weekly{display:block!important}
+  .no-print{display:none!important}
+  .wk-doc{box-shadow:none;border-radius:0;padding:0}
+  .wk-t tr,.wk-alert li{page-break-inside:avoid}
+  .wk-h{page-break-after:avoid}
+  *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+}
 </style>
 </head>
 <body>
@@ -222,6 +264,7 @@ tr.yr24:hover td{background:#FFF9D0}
 <!-- ── TOP BAR ────────────────────────────── -->
 <div class="top-bar">
   <span class="brand">📋 공사 PM</span>
+  <select class="company-select" id="yearSelect" onchange="applyFilter()"><option value="all">전체 연도</option></select>
   <select class="company-select" id="companySelect" onchange="applyFilter()">
     <option value="all">전체 사업부</option>
     <option value="koreapolymer">고려폴리머</option>
@@ -256,6 +299,7 @@ tr.yr24:hover td{background:#FFF9D0}
   <button class="nav-btn" onclick="showSection('cost',this)">🔧 제작원가</button>
   <button class="nav-btn" onclick="showSection('history',this)">📝 이력</button>
   <button class="nav-btn" onclick="showSection('settle',this)">🧾 정산서</button>
+  <button class="nav-btn" onclick="showSection('weekly',this)">📊 주간회의</button>
 </div>
 
 <!-- ══════════════ 대시보드 ══════════════ -->
@@ -278,7 +322,7 @@ tr.yr24:hover td{background:#FFF9D0}
 <div id="sec-quote" class="section">
   <div class="num-guide">
     <strong>📌 넘버링 체계</strong> &nbsp;
-    견적 <code>Q26-1001</code> → 수주 시 <code>[계약전환]</code> 버튼으로 공사번호 <code>P26-0407-1</code> 자동 생성 및 연계
+    견적 <code>Q26-1001</code> → 수주 시 <code>[계약전환]</code> 버튼으로 공사번호 <code>P2026-영업-NN</code> 자동 생성 · 견적자/최종계약자 필수 기록
   </div>
   <div class="pipe-grid" id="quotePipeline"></div>
   <div class="card">
@@ -427,6 +471,20 @@ tr.yr24:hover td{background:#FFF9D0}
       </div>
     </div>
   </div>
+</div>
+
+<!-- ══════════════ 주간회의 ══════════════ -->
+<div id="sec-weekly" class="section">
+  <div class="wk-toolbar no-print">
+    <button class="btn sm" onclick="weekShift(-1)">◀ 이전 주</button>
+    <span class="wk-period" id="wkPeriodLbl"></span>
+    <button class="btn sm" onclick="weekShift(1)">다음 주 ▶</button>
+    <button class="btn sm" onclick="weekShift(0)">이번 주</button>
+    <span style="flex:1"></span>
+    <button class="btn" onclick="copyWeekly()">📋 카톡 요약 복사</button>
+    <button class="btn primary" onclick="printWeekly()">🖨 인쇄 / PDF 저장</button>
+  </div>
+  <div class="wk-doc" id="weeklyReport"></div>
 </div>
 
 <!-- ── 모달 영역 ────────────────────────────── -->
@@ -594,7 +652,7 @@ const uid=()=>'P'+Date.now().toString(36).toUpperCase().slice(-6);
 // ════════════════════════════════════════════════════════
 //  상태
 // ════════════════════════════════════════════════════════
-let curCompany='all', searchTerm='';
+let curCompany='all', searchTerm='', curYear='all';
 const STAFF = ['조민','변기식','송성호','조정호','조정헌','박규열','정민지','서영주','윤준호'];
 
 // ════════════════════════════════════════════════════════
@@ -630,7 +688,7 @@ function nextQuoteId(){
   return 'Q'+yr+'-'+(max+1);
 }
 
-// 공사번호 자동 생성 (P26-0407-1 형식)
+// 공사번호 자동 생성 (P2026-영업-NN 형식)
 function nextProjId(){
   // 통일 형식: P{연도4}-영업-{2자리 연번}   예) P2026-영업-20
   const yr = new Date().getFullYear();
@@ -820,7 +878,7 @@ const PROC_2026 = [{"name":"소망계단 모노레일 안내 표지판 구입(�
 //  초기화: 최초 시딩 + 데이터 개정(마이그레이션)
 //  · 모든 개정은 재실행해도 결과가 같도록(멱등) 작성
 // ════════════════════════════════════════════════════════
-const DATA_VERSION = 2;
+const DATA_VERSION = 4;
 
 async function initData(){
   if(!db || !fbReady) return;
@@ -853,6 +911,8 @@ async function runMigrations(){
   console.log('데이터 개정 실행: v'+cur+' → v'+DATA_VERSION);
   if(cur < 1) await migrateV1();
   if(cur < 2) await migrateV2();
+  if(cur < 3) await migrateV3();
+  if(cur < 4) await migrateV4();
   await db.ref('pm/_dataVersion').set(DATA_VERSION);
   console.log('데이터 개정 완료');
   renderAll();
@@ -896,6 +956,72 @@ async function migrateV1(){
 
   await save(K.quote, quotes, '시스템');
   await save(K.proj,  projs,  '시스템');
+}
+
+// 고려폴리머 관급 계약대장 「금속창호 기타공사 내역(2026년도)」 38건 (2026-09-21 판독)
+const SHEET_2026 = [{"cd":"2024-07-26","cl":"한국디자인진흥원","nm":"온산 도시재생 상가거리 및 시장환경 개선사업","amt":410000000,"st":"2024-07-26","en":"2026-06-30","done":true,"ct":"공사","wk":"조형물,안내판외,금속창호공사","bl":410000000,"idt":"2026-06-30","im":"2026.02.23 123,000,000(선금) / 2026.06.30 287,000,000","nt":"공동수급 총액 972,510,000 중 당사분"},{"cd":"2025-11-25","cl":"양산시청(㈜코림)","nm":"평산마을 셉테드기법 안심골목길 조성사업","amt":68000000,"st":"2025-11-25","en":"2026-01-15","done":true,"ct":"물품","wk":"공사이나 물품처리","bl":68000000,"idt":"2026-03-09"},{"cd":"2025-12-16","cl":"한국소재융합연구원","nm":"접수실 등 부대시설 설치 공사","amt":21780000,"st":"2025-12-16","en":"2026-01-30","done":true,"ct":"공사","wk":"실내건축공사","bl":21780000,"idt":"2026-01-13"},{"cd":"2025-12-24","cl":"양산시청","nm":"평산마을 셉테드기법 안심골목길 조성사업-건물번호판","amt":15121900,"st":"2025-12-24","en":"2026-02-02","done":true,"pt":"MAS","ct":"물품","wk":"물품","bl":15121900,"idt":"2026-02-12"},{"cd":"2026-01-27","cl":"부산광역시 중구","nm":"남포역 부산형안내판 구입","amt":454000,"st":"2026-01-27","en":"2026-03-09","done":true,"pt":"MAS","ct":"물품","wk":"물품","bl":454000,"idt":"2026-02-05"},{"cd":"2026-02-11","cl":"북구청","nm":"용두천 일원 경관개선사업 물품 제작·설치","amt":150234000,"st":"2026-02-11","en":"2026-09-11","done":false,"ct":"물품","wk":"금속창호","bl":105163800,"idt":"2026-02-25","im":"2026.02.25 105,163,800(선금)","nt":"공동수급 총액 357,700,000 중 당사분 · 나라장터 -01 변경계약(2026.09.04)","match":"R26TA01463560-01"},{"cd":"2026-02-19","cl":"부산시설공단","nm":"어린이대공원사업소 공공조형물 정비 공사","amt":17200000,"st":"2026-02-19","en":"2026-03-18","done":true,"ct":"공사","wk":"도장공사","bl":17200000,"idt":"2026-03-19"},{"cd":"2026-02-20","cl":"부산시설공단","nm":"남포지하도상가 출입구 간판 제작·설치","amt":17952000,"st":"2026-02-20","en":"2026-03-20","done":true,"ct":"물품","wk":"물품","bl":17952000,"idt":"2026-03-16"},{"cd":"2026-03-03","cl":"전국개인택시운송사업조합","nm":"남포동 조형물 보수","amt":4500000,"st":"2026-03-03","en":"2026-04-01","done":true,"ct":"물품","wk":"물품","bl":4500000,"idt":"2026-04-01"},{"cd":"2026-03-27","cl":"포항시(아이엠커뮤니케이션)","nm":"포항시 안전특화거리 조성사업","amt":140000000,"st":"2026-03-27","en":"2026-04-22","done":true,"ct":"물품","wk":"공사이나 물품처리","bl":140000000,"idt":"2026-05-26"},{"cd":"2026-04-06","cl":"서구청","nm":"소망계단 모노레일 안내 표지판 구입(설치)","amt":7760000,"st":"2026-04-06","en":"2026-04-24","done":true,"ct":"물품","wk":"물품","bl":7760000,"idt":"2026-04-29","match":"R26TA01711053-00"},{"cd":"2026-04-21","cl":"동래구청(거도산업㈜유승)","nm":"동래역 하부 온천천 가로이미지 개선공사","amt":24670000,"st":"2026-04-24","en":"2026-07-22","done":true,"ct":"물품","wk":"공사이나 물품처리","bl":24670000,"idt":"2026-08-07"},{"cd":"2026-04-24","cl":"만덕2동행정복지센터","nm":"마을안심길 굴다리 '세이프&클린' 사업","amt":10000000,"st":"2026-04-27","en":"2026-05-22","done":true,"ct":"공사","wk":"도장공사","bl":10000000,"idt":"2026-05-27"},{"cd":"2026-04-27","cl":"동래구청","nm":"2026년 상반기 지진 옥외대피장소 표지판 구입","amt":2141000,"st":"2026-04-27","en":"2026-06-06","done":true,"pt":"MAS","ct":"물품","wk":"물품","bl":2141000,"idt":"2026-05-13","match":"NAME"},{"cd":"2026-05-06","cl":"중구청","nm":"국제시장 일원 간판 디자인 개선 철거 사업 간판 제작 설치","amt":259000000,"st":"2026-05-06","en":"2026-07-05","done":true,"ct":"물품","wk":"물품","bl":259000000,"idt":"2026-07-13","im":"2026.05.20 158,566,100(선금) / 2026.07.13 100,433,900","nt":"당초 226,523,000 + 증액 32,477,000(2026.06.01, 나라장터 -01 변경계약)","match":"R26TA01824823-01","fs":true},{"cd":"2026-06-08","cl":"부산진구청","nm":"2026년 부산진구 관내 관광안내판 정비","amt":4750000,"st":"2026-06-08","en":"2026-07-10","done":true,"ct":"물품","wk":"물품","bl":4750000,"idt":"2026-07-20","match":"R26TA01939955-00"},{"cd":"2026-06-10","cl":"부산광역시 낙동강관리본부","nm":"삼락생태공원 내 안내판 정비(관급자재)","amt":47836000,"st":"2026-06-10","en":"2026-07-20","done":true,"pt":"MAS","ct":"물품","wk":"물품","bl":47836000,"idt":"2026-07-30"},{"cd":"2026-06-11","cl":"아이엠커뮤니케이션","nm":"인왕동 문화공원 선덕여왕 동산 건립 사업 중 동상 회전체 제작 및 설치","amt":25000000,"st":"2026-06-11","en":"2026-09-30","done":false,"ct":"물품","wk":"물품"},{"cd":"2026-06-15","cl":"부산교통공사","nm":"부산교통공사 캐릭터 조형물 제작·설치","amt":15932000,"st":"2026-06-15","en":"2026-08-04","done":true,"ct":"물품","wk":"물품","bl":15932000,"idt":"2026-08-13","match":"R26TA01957175-00"},{"cd":"2026-06-19","cl":"영도구청","nm":"부산항 영도 크루즈터미널 관광수용태세 개선 물품 구입","amt":9800000,"st":"2026-06-19","en":"2026-08-18","done":true,"ct":"물품","wk":"물품","bl":9800000,"idt":"2026-08-06","match":"R26TA01983831-00"},{"cd":"2026-06-23","cl":"부산관광공사","nm":"문화관광해설사의 집 외부 도색 공사","amt":3724600,"st":"2026-06-23","en":"2026-07-23","done":true,"ct":"공사","wk":"도장공사","bl":3724600,"idt":"2026-07-23","match":"R26TA01993050-00"},{"cd":"2026-06-25","cl":"강서구청","nm":"2026년 상반기 관광안내시설물 정비 용역","amt":7620000,"st":"2026-07-20","en":"2026-08-13","done":true,"ct":"용역","wk":"용역","bl":7620000,"idt":"2026-08-19","match":"R26TA02005401-00"},{"cd":"2026-06-29","cl":"해운대구청","nm":"관광안내표지판 (주민참여예산)","amt":5225000,"st":"2026-06-29","en":"2026-08-08","done":true,"pt":"MAS","ct":"물품","wk":"물품","bl":5225000,"idt":"2026-08-06"},{"cd":"2026-07-02","cl":"연제구청","nm":"우리동네 ESG센터 조성사업 건축공사","amt":217328200,"st":"2026-07-09","en":"2026-09-15","done":false,"ct":"공사","wk":"실내건축","nt":"나라장터 -02 변경계약(2026.09.10)","match":"R26TA02026191-02"},{"cd":"2026-07-10","cl":"사상구청","nm":"덕포역 앞 자전거 무단주차 방지 안내판 설치 물품-안내판","amt":613000,"st":"2026-07-10","en":"2026-08-19","done":true,"pt":"MAS","ct":"물품","wk":"물품","bl":613000,"idt":"2026-08-19"},{"cd":"2026-07-17","cl":"부산디자인진흥원","nm":"2025 안심마을 조성 시설물공사(동구)관급자재","amt":2043500,"st":"2026-07-17","en":"2026-08-26","done":true,"pt":"MAS","ct":"물품","wk":"공사이나 물품처리","bl":2043500,"idt":"2026-09-14"},{"cd":"2026-07-20","cl":"부산디자인진흥원(부성창호㈜)","nm":"2025지역 맞춤형 안심마을 조성 시설물공사(동구)","amt":36093000,"st":"2026-07-20","en":"2026-09-17","done":false,"ct":"물품","wk":"공사이나 물품처리"},{"cd":"2026-07-20","cl":"동부경찰서(유원디자인)","nm":"동부경찰서 셉테드","amt":9774600,"st":"2026-07-20","en":"2026-08-31","done":true,"ct":"물품","wk":"물품","bl":9774600,"idt":"2026-09-11"},{"cd":"2026-07-31","cl":"부산교통공사","nm":"엘리베이터 안내표지 제작·구매","amt":4914600,"st":"2026-07-31","en":"2026-08-30","done":true,"ct":"물품","wk":"물품","bl":4914600,"idt":"2026-08-03","match":"R26TA02110851-00"},{"cd":"2026-08-18","cl":"부산테크노파크","nm":"해양과학기술 산학연 협력센터 간판 제작 및 설치 용역","amt":11825000,"st":"2026-08-18","en":"2026-08-25","done":true,"ct":"용역","wk":"용역","bl":11825000,"idt":"2026-08-25","match":"R26TA02149518-00"},{"cd":"2026-08-20","cl":"영도구청","nm":"근대역사 100년 흔적길 보행환경 정비 용역","amt":4963200,"st":"2026-08-24","en":"2026-10-02","done":false,"ct":"용역","wk":"용역","match":"R26TA02157631-00"},{"cd":"2026-09-03","cl":"부산관광공사","nm":"문화관광해설사의 집 안내표지판 및 열차단 필름 시공","amt":7557000,"st":"2026-09-03","en":"2026-09-30","done":false,"ct":"물품","wk":"물품","match":"R26TA02200808-00"},{"cd":"2026-09-04","cl":"밀양시청","nm":"2027년 간판개선사업 기초조사설계 용역","amt":9900000,"st":"2026-09-07","en":"2026-12-05","done":false,"ct":"용역","wk":"용역","match":"R26TA02200502-00"},{"cd":"2026-09-04","cl":"동래구청","nm":"2026년 하반기 지진 옥외대피장소 표지판 구입","amt":312000,"st":"2026-09-04","en":"2026-10-14","done":false,"pt":"MAS","ct":"물품","wk":"물품"},{"cd":"2026-09-10","cl":"부림건축디자인","nm":"2025 안심마을 조성 북구 안내판 제작 설치","amt":5940000,"st":"2026-09-10","en":"2026-09-30","done":false,"ct":"물품","wk":"물품"},{"cd":"2026-09-11","cl":"금정구청","nm":"범어사 일원 노후 안내유도표지판 구입","amt":17424000,"st":"2026-09-11","en":"2026-10-30","done":false,"ct":"물품","wk":"물품","match":"R26TA02224751-00"}];
+
+// ── v4: 대표 확인 반영 — 작년 준공분 2건 제외 · 연도 확정 2건 보정메모 삭제 ──
+async function migrateV4(){
+  const projs = await _fresh(K.proj);
+  const purch = load(K.purch), costs = load(K.cost), hist = load(K.hist);
+  const nm = s => String(s||'').replace(/[\s·・\(\)\-\/,.'"&]/g,'');
+  const DROP = [ {n:'남목옥류로디자인거리조성사업', d:'2024-01-10'}, {n:'우수공공디자인사업', d:'2026-01-30'} ];
+  const NOTES = ['원문 준공일 "2024.07.22" 표기 — 2026.07.22로 판단',
+                 '원문 계약일자 "2025.07.20" 표기 — 공사기간 기준 2026.07.20으로 판단'];
+  let changed = false;
+  const keep = projs.filter(p=>{
+    if(!DROP.some(x=>x.n===nm(p.name) && x.d===p.contractDate)) return true;
+    // 발주·원가·이력이 연결돼 있으면 지우지 않음 (직원 입력 보호)
+    if(purch.some(x=>x.projectId===p.id)||costs.some(x=>x.projectId===p.id)||hist.some(x=>x.projectId===p.id)) return true;
+    changed = true; return false;
+  });
+  keep.forEach(p=>{
+    if(!p.note) return;
+    const n = String(p.note).split(' / ').filter(s=>NOTES.indexOf(s)<0).join(' / ');
+    if(n!==p.note){ p.note = n; changed = true; }
+  });
+  if(changed) await save(K.proj, keep, '시스템');
+}
+
+// ── v3: 관급 계약대장 반영 — 금액·계약일·계산서 보강 + 미등록 22건 추가 ──
+async function migrateV3(){
+  const projs = await _fresh(K.proj);
+  const nm = s => String(s||'').replace(/[\s·・\(\)\-\/,.'"&]/g,'');
+  const procStart = {}; PROC_2026.forEach(x=>procStart[x.contractNo]=x.start);
+  const maxBy = {};
+  projs.forEach(p=>{ const m=String(p.id).match(/^P(\d{4})-영업-(\d+)$/); if(m) maxBy[m[1]]=Math.max(maxBy[m[1]]||0,+m[2]); });
+
+  const fill = (p, s) => {                       // 비어 있는 칸만 채움 (직원 입력값 보존)
+    if(!(Number(p.contract)>0)) p.contract = s.amt;
+    if(!p.contractDate) p.contractDate = s.cd;
+    if(s.st && (!p.start || (s.fs && p.start===procStart[p.contractNo]) || p.start===procStart[p.contractNo])) p.start = s.st;
+    if(!p.end && s.en) p.end = s.en;
+    if(s.done && (p.status==='ing'||p.status==='prep')) p.status = 'done';
+    if(s.pt && !p.procureType) p.procureType = s.pt;
+    if(p.billed==null && s.bl!=null){ p.billed = s.bl; p.invoiceDate = s.idt||''; }
+    if(!p.invoiceMemo && s.im) p.invoiceMemo = s.im;
+    if(!p.workType && s.wk) p.workType = s.wk;
+    if(s.nt && String(p.note||'').indexOf(s.nt)<0) p.note = (p.note ? p.note+' / ' : '') + s.nt;
+  };
+
+  SHEET_2026.slice().sort((a,b)=>a.cd.localeCompare(b.cd)).forEach(s=>{
+    let p = null;
+    if(s.match && s.match!=='NAME') p = projs.find(x=>x.contractNo===s.match);
+    if(!p) p = projs.find(x=>nm(x.name)===nm(s.nm));
+    if(p){ fill(p, s); return; }
+    const yr = s.cd.slice(0,4);
+    maxBy[yr] = (maxBy[yr]||0) + 1;
+    const np = {
+      id:'P'+yr+'-영업-'+String(maxBy[yr]).padStart(2,'0'), name:s.nm, company:'koreapolymer',
+      client:s.cl, contractType:s.ct, contractNo:'', procureType:s.pt||'',
+      contract:s.amt, contractDate:s.cd, start:s.st||'', end:s.en||'',
+      status:s.done?'done':'ing', quoteOwner:'', salesOwner:''
+    };
+    fill(np, s);
+    projs.push(np);
+  });
+  await save(K.proj, projs, '시스템');
 }
 
 // ── v2: 2026 조달 계약 등록 (나라장터 계약체결목록) ──
@@ -949,6 +1075,7 @@ async function migrateV2(){
 // ════════════════════════════════════════════════════════
 function applyFilter(){
   curCompany=document.getElementById('companySelect').value;
+  curYear=document.getElementById('yearSelect').value;
   searchTerm=document.getElementById('globalSearch').value.trim();
   renderAll();
 }
@@ -956,6 +1083,7 @@ function applyFilter(){
 function getProjects(){
   let p=load(K.proj);
   if(curCompany!=='all') p=p.filter(x=>x.company===curCompany);
+  if(curYear!=='all') p=p.filter(x=>String(x.contractDate||x.start||'').slice(0,4)===curYear);
   if(searchTerm){
     const q=searchTerm.toLowerCase();
     p=p.filter(x=>(x.name||'').toLowerCase().includes(q)||(x.id||'').toLowerCase().includes(q)||(x.client||'').toLowerCase().includes(q));
@@ -1024,14 +1152,16 @@ function renderDashboard(){
     tAmt+=Number(p.contract||0);
     tSpent+=calcProfit(p).spent;
   });
-  const tProfit=tAmt-tSpent;
-  const avgRate=tAmt>0?Math.round(tProfit/tAmt*1000)/10:0;
+  // 평균 이익률: 발주·원가가 입력된 공사만 대상 (투입비 0원 공사는 100%로 잡혀 왜곡되므로 제외)
+  let cAmt=0,cSpent=0,cN=0;
+  projs.forEach(p=>{ const s=calcProfit(p).spent; if(s>0 && Number(p.contract)>0){ cAmt+=Number(p.contract); cSpent+=s; cN++; } });
+  const avgRate=cAmt>0?Math.round((cAmt-cSpent)/cAmt*1000)/10:0;
   document.getElementById('dashMetrics').innerHTML=`
     <div class="metric-card"><div class="metric-lbl">전체 프로젝트</div><div class="metric-val">${projs.length}건</div></div>
     <div class="metric-card"><div class="metric-lbl">진행중</div><div class="metric-val ok">${ti}건</div></div>
-    <div class="metric-card"><div class="metric-lbl">총 수주액</div><div class="metric-val">${Math.round(tAmt/10000)}만원</div></div>
-    <div class="metric-card"><div class="metric-lbl">총 투입비</div><div class="metric-val">${Math.round(tSpent/10000)}만원</div></div>
-    <div class="metric-card"><div class="metric-lbl">평균 이익률</div><div class="metric-val ${pClass(avgRate)}">${avgRate}%</div></div>
+    <div class="metric-card"><div class="metric-lbl">총 수주액</div><div class="metric-val">${man(tAmt)}원</div></div>
+    <div class="metric-card"><div class="metric-lbl">총 투입비</div><div class="metric-val">${man(tSpent)}원</div></div>
+    <div class="metric-card"><div class="metric-lbl">평균 이익률 <span style="font-size:10px;color:var(--text3)">(원가입력 ${cN}건)</span></div><div class="metric-val ${cN?pClass(avgRate):''}">${cN?avgRate+'%':'-'}</div></div>
     <div class="metric-card"><div class="metric-lbl">준비 / 완료</div><div class="metric-val">${tc} / ${td}건</div></div>
   `;
   document.getElementById('dashCount').textContent=`${projs.length}건 표시 중`;
@@ -1075,7 +1205,7 @@ function renderProjects(){
       <td style="font-size:11px">${p.client||'-'}</td>
       <td><span style="font-size:10px;color:var(--text2)">${coLabel(p.company)}</span></td>
       <td>${ctBadge(p.contractType)}</td>
-      <td style="font-size:10px;color:var(--text2)">${p.contractNo||'-'}${p.procureType?'<br><span class="badge '+(p.procureType==='낙찰'?'badge-won':'badge-quoting')+'" style="font-size:9px">'+p.procureType+'</span>':''}</td>
+      <td style="font-size:10px;color:var(--text2)">${p.contractNo||'-'}${p.procureType?'<br><span class="badge '+(p.procureType==='낙찰'?'badge-won':p.procureType==='MAS'?'badge-nego':'badge-quoting')+'" style="font-size:9px">'+p.procureType+'</span>':''}</td>
       <td>${statusBadge(p.status)}</td>
       <td style="font-size:11px">${p.quoteOwner||'<span style="color:#A32D2D">미지정</span>'}</td>
       <td style="font-size:11px;font-weight:600;color:var(--navy)">${p.salesOwner||'<span style="color:#A32D2D;font-weight:400">미지정</span>'}</td>
@@ -1177,11 +1307,210 @@ function renderHistory(){
     </div>`).join('');
 }
 
+function renderYearSelect(){
+  const sel=document.getElementById('yearSelect'); if(!sel) return;
+  const ys=[...new Set(load(K.proj).map(p=>String(p.contractDate||p.start||'').slice(0,4)).filter(y=>/^\d{4}$/.test(y)))].sort().reverse();
+  sel.innerHTML='<option value="all">전체 연도</option>'+ys.map(y=>'<option value="'+y+'"'+(y===curYear?' selected':'')+'>'+y+'년</option>').join('');
+}
 function renderAll(){
+  renderYearSelect();
   renderQuoteOwnerFilter();
   renderQuotes();
   renderDashboard();renderProjects();renderPurchase();renderCost();renderHistory();
   initSettleProj();
+  renderWeekly();
+}
+
+
+// ════════════════════════════════════════════════════════
+//  주간회의 보고서 (A4 2장 이내 · 표지 없음)
+// ════════════════════════════════════════════════════════
+let WEEK_OFFSET = 0;
+const esc = s => String(s==null?'':s).replace(/[&<>"]/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
+const ymd = d => d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+const man = n => { n=Number(n||0); return n>=100000000 ? (Math.round(n/10000000)/10)+'억' : Math.round(n/10000).toLocaleString()+'만'; };
+
+function weekRange(){
+  const t = new Date(); t.setHours(0,0,0,0);
+  const dow = (t.getDay()+6)%7;                 // 월=0
+  const s = new Date(t); s.setDate(t.getDate()-dow+WEEK_OFFSET*7);
+  const e = new Date(s); e.setDate(s.getDate()+6);
+  return {s, e, S:ymd(s), E:ymd(e), today:ymd(t)};
+}
+function weekShift(n){ WEEK_OFFSET = n===0 ? 0 : WEEK_OFFSET+n; renderWeekly(); }
+function inRange(d, R){ return d && d>=R.S && d<=R.E; }
+
+function weeklyData(){
+  const R = weekRange();
+  const quotes = load(K.quote);
+  const projs  = getProjects();                       // 사업부 필터 반영
+  const pIds   = new Set(projs.map(p=>p.id));
+  const hist   = load(K.hist).filter(h=>pIds.has(h.projectId));
+  const addDays = (d,n)=>{ const x=new Date(d); x.setDate(x.getDate()+n); return ymd(x); };
+  const today = R.today, soon = addDays(new Date(today), 7), stale = addDays(new Date(today), -30);
+
+  const newQ   = quotes.filter(q=>inRange(q.recvDate,R)).sort((a,b)=>a.recvDate.localeCompare(b.recvDate));
+  const newP   = projs.filter(p=>inRange(p.contractDate||p.start,R)).sort((a,b)=>(a.contractDate||a.start||'').localeCompare(b.contractDate||b.start||''));
+  const ing    = projs.filter(p=>p.status==='ing'||p.status==='prep')
+                      .sort((a,b)=>(a.end||'9999').localeCompare(b.end||'9999'));
+  const wkHist = hist.filter(h=>inRange(h.date,R)).sort((a,b)=>a.date.localeCompare(b.date));
+
+  const act = projs.filter(p=>p.status!=='done');
+  const chk = {
+    noAmt:   act.filter(p=>!(Number(p.contract)>0)),
+    noOwner: projs.filter(p=>!p.quoteOwner||!p.salesOwner),
+    overdue: projs.filter(p=>p.status==='ing' && p.end && p.end<today),
+    dueSoon: projs.filter(p=>p.status==='ing' && p.end && p.end>=today && p.end<=soon),
+    lowMg:   act.filter(p=>{ if(!(Number(p.contract)>0)) return false; const c=calcProfit(p); return c.spent>0 && c.rate<10; }),
+    staleQ:  quotes.filter(q=>(q.status==='quoting'||q.status==='nego') && q.recvDate && q.recvDate<stale)
+  };
+
+  const closed = quotes.filter(q=>['won','done','lost'].includes(q.status));
+  const won    = closed.filter(q=>q.status!=='lost');
+  const kpi = {
+    newQn: newQ.length, newQa: newQ.reduce((s,q)=>s+Number(q.amount||0),0),
+    newPn: newP.length, newPa: newP.reduce((s,p)=>s+Number(p.contract||0),0),
+    ingN: ing.length,  ingA: ing.reduce((s,p)=>s+Number(p.contract||0),0),
+    pipeN: quotes.filter(q=>q.status==='quoting'||q.status==='nego').length,
+    winRate: closed.length ? Math.round(won.length/closed.length*1000)/10 : 0,
+    issues: chk.noAmt.length+chk.noOwner.length+chk.overdue.length+chk.dueSoon.length+chk.lowMg.length
+  };
+
+  // 담당자별 (최종계약자 기준 진행공사 / 견적자 기준 진행견적)
+  const who = {};
+  const add = (n,k,v)=>{ if(!n) return; who[n]=who[n]||{ing:0,ingA:0,pipe:0,newQ:0}; who[n][k]+=v; };
+  ing.forEach(p=>{ add(p.salesOwner,'ing',1); add(p.salesOwner,'ingA',Number(p.contract||0)); });
+  quotes.filter(q=>q.status==='quoting'||q.status==='nego').forEach(q=>add(q.owner,'pipe',1));
+  newQ.forEach(q=>add(q.owner,'newQ',1));
+  return {R, newQ, newP, ing, wkHist, chk, kpi, who};
+}
+
+function renderWeekly(){
+  const el = document.getElementById('weeklyReport');
+  if(!el) return;
+  const D = weeklyData(), R = D.R;
+  const md = d => d ? d.slice(5).replace('-','.') : '-';
+  const dw = d => ['월','화','수','목','금','토','일'][(d.getDay()+6)%7];
+  const period = R.S.replace(/-/g,'.')+'('+dw(R.s)+') ~ '+md(R.E)+'('+dw(R.e)+')';
+  const lbl = document.getElementById('wkPeriodLbl'); if(lbl) lbl.textContent = period + (WEEK_OFFSET===0?' · 이번 주':'');
+  const coName = {all:'전체 사업부',koreapolymer:'고려폴리머',kdesign:'케이디자인웍스'}[curCompany]||'';
+  const pn = id => { const p=load(K.proj).find(x=>x.id===id); return p?p.name:id; };
+  const qs = {quoting:'견적중',nego:'협의중',won:'수주',lost:'실주',hold:'보류',done:'완료'};
+  const ps = {prep:'준비',ing:'진행',done:'완료',maint:'유지보수'};
+  const names = (arr, f, n=6) => arr.slice(0,n).map(f).join(', ') + (arr.length>n?' 외 '+(arr.length-n)+'건':'');
+  const k = D.kpi;
+
+  let h = '';
+  h += '<div class="wk-head"><div class="wk-title">주간 사업현황 보고</div>'
+     + '<div class="wk-meta">'+esc(period)+'<br>'+esc(coName)+' · 작성 '+esc(ME||'-')+' · 출력 '+ymd(new Date())+'</div></div>';
+
+  // ① 핵심 지표
+  h += '<div class="wk-kpi">'
+     + '<div><span>금주 신규견적</span><b>'+k.newQn+'건</b><small>'+(k.newQa?man(k.newQa)+'원':'-')+'</small></div>'
+     + '<div><span>금주 신규계약</span><b>'+k.newPn+'건</b><small>'+(k.newPa?man(k.newPa)+'원':'-')+'</small></div>'
+     + '<div><span>진행 공사</span><b>'+k.ingN+'건</b><small>'+(k.ingA?man(k.ingA)+'원':'-')+'</small></div>'
+     + '<div><span>영업 파이프라인</span><b>'+k.pipeN+'건</b><small>견적·협의중</small></div>'
+     + '<div><span>누적 수주율</span><b class="'+(k.winRate>=50?'wk-grn':k.winRate>=30?'wk-org':'wk-red')+'">'+k.winRate+'%</b><small>수주/(수주+실주)</small></div>'
+     + '<div><span>관리 필요</span><b class="'+(k.issues?'wk-red':'wk-grn')+'">'+k.issues+'건</b><small>아래 ② 참조</small></div>'
+     + '</div>';
+
+  // ② 관리 필요 사항 (회의 안건)
+  const C = D.chk, items = [];
+  if(C.overdue.length) items.push('<b>준공일 경과·진행중 '+C.overdue.length+'건</b> — '+esc(names(C.overdue,p=>p.name+'('+md(p.end)+', '+(p.salesOwner||'미지정')+')')));
+  if(C.dueSoon.length) items.push('<b>7일 내 준공 예정 '+C.dueSoon.length+'건</b> — '+esc(names(C.dueSoon,p=>p.name+'('+md(p.end)+')')));
+  if(C.lowMg.length)   items.push('<b>이익률 10% 미만 '+C.lowMg.length+'건</b> — '+esc(names(C.lowMg,p=>p.name+'('+calcProfit(p).rate+'%)')));
+  if(C.noAmt.length)   items.push('<b>계약금액 미입력 '+C.noAmt.length+'건</b> — '+esc(names(C.noAmt,p=>p.id,8)));
+  if(C.noOwner.length) items.push('<b>견적자·최종계약자 미지정 '+C.noOwner.length+'건</b> — '+esc(names(C.noOwner,p=>p.id,8)));
+  if(C.staleQ.length){
+    const by={}; C.staleQ.forEach(q=>{const o=q.owner||'미지정'; by[o]=(by[o]||0)+1;});
+    items.push('<b>30일 이상 정체 견적 '+C.staleQ.length+'건</b> — '+esc(Object.entries(by).sort((a,b)=>b[1]-a[1]).map(([o,n])=>o+' '+n).join(', '))+' (상태 정리 필요)');
+  }
+  h += '<div class="wk-h">① 관리 필요 사항 <em>자동 점검 · 회의 안건</em></div>'
+     + (items.length?'<ul class="wk-alert">'+items.map(i=>'<li>'+i+'</li>').join('')+'</ul>':'<div class="wk-none">특이사항 없음</div>');
+
+  // ③ 금주 신규 견적 / 신규 계약
+  h += '<div class="wk-h">② 금주 신규 견적 <em>'+D.newQ.length+'건</em></div>';
+  h += D.newQ.length ? '<table class="wk-t"><tr><th>견적번호</th><th>접수</th><th>고객사</th><th>건명</th><th>견적금액</th><th>견적자</th><th>상태</th></tr>'
+     + D.newQ.map(q=>'<tr><td class="c">'+esc(q.id)+'</td><td class="c">'+md(q.recvDate)+'</td><td>'+esc(q.client)+'</td><td>'+esc(q.name)+'</td><td class="r">'+(Number(q.amount)>0?fmt(q.amount):'협의')+'</td><td class="c">'+esc(q.owner||'-')+'</td><td class="c">'+(qs[q.status]||'')+'</td></tr>').join('')
+     + '</table>' : '<div class="wk-none">해당 없음</div>';
+
+  h += '<div class="wk-h">③ 금주 신규 계약 <em>'+D.newP.length+'건 · 계약일 기준</em></div>';
+  h += D.newP.length ? '<table class="wk-t"><tr><th>공사번호</th><th>공사명</th><th>발주처</th><th>방식</th><th>계약금액</th><th>견적자</th><th>최종계약자</th></tr>'
+     + D.newP.map(p=>'<tr><td class="c">'+esc(p.id)+'</td><td>'+esc(p.name)+'</td><td>'+esc(p.client)+'</td><td class="c">'+esc(p.procureType||p.contractType||'')+'</td><td class="r">'+(Number(p.contract)>0?fmt(p.contract):'<span class="wk-red">미입력</span>')+'</td><td class="c">'+esc(p.quoteOwner||'-')+'</td><td class="c"><b>'+esc(p.salesOwner||'-')+'</b></td></tr>').join('')
+     + '</table>' : '<div class="wk-none">해당 없음</div>';
+
+  // ④ 진행 공사 현황
+  h += '<div class="wk-h">④ 진행 공사 현황 <em>'+D.ing.length+'건 · 준공일 순</em></div>';
+  h += D.ing.length ? '<table class="wk-t"><tr><th>공사번호</th><th>공사명</th><th>발주처</th><th>최종계약자</th><th>계약금액</th><th>투입</th><th>이익률</th><th>준공</th><th>상태</th></tr>'
+     + D.ing.map(p=>{
+         const c = calcProfit(p), has = Number(p.contract)>0;
+         const rc = !has ? '' : c.rate<0?'wk-red':c.rate<10?'wk-org':'wk-grn';
+         const endC = p.end && p.end<R.today ? 'wk-red' : '';
+         return '<tr><td class="c">'+esc(p.id)+'</td><td>'+esc(p.name)+'</td><td>'+esc(p.client)+'</td>'
+           +'<td class="c"><b>'+esc(p.salesOwner||'-')+'</b></td>'
+           +'<td class="r">'+(has?man(p.contract):'<span class="wk-red">미입력</span>')+'</td>'
+           +'<td class="r">'+(c.spent?man(c.spent):'-')+'</td>'
+           +'<td class="r '+rc+'">'+(has&&c.spent?c.rate+'%':'-')+'</td>'
+           +'<td class="c '+endC+'">'+md(p.end)+'</td><td class="c">'+(ps[p.status]||'')+'</td></tr>';
+       }).join('') + '</table>' : '<div class="wk-none">해당 없음</div>';
+
+  // ⑤ 금주 이력 + 담당자별 현황
+  const whoRows = Object.entries(D.who).sort((a,b)=>b[1].ingA-a[1].ingA||b[1].pipe-a[1].pipe);
+  h += '<div class="wk-2col"><div>'
+     + '<div class="wk-h">⑤ 금주 현장이슈·설계변경 <em>'+D.wkHist.length+'건</em></div>'
+     + (D.wkHist.length ? '<table class="wk-t"><tr><th>일자</th><th>공사</th><th>내용</th></tr>'
+        + D.wkHist.map(x=>'<tr><td class="c">'+md(x.date)+'<br>'+esc(x.category)+'</td><td>'+esc(pn(x.projectId))+'</td><td>'+esc(String(x.content||'').split('\n')[0].slice(0,60))+'</td></tr>').join('') + '</table>'
+        : '<div class="wk-none">해당 없음</div>')
+     + '</div><div>'
+     + '<div class="wk-h">⑥ 담당자별 현황</div>'
+     + (whoRows.length ? '<table class="wk-t"><tr><th>담당자</th><th>진행공사<br>(최종계약자)</th><th>진행금액</th><th>진행견적</th><th>금주견적</th></tr>'
+        + whoRows.map(([n,v])=>'<tr><td class="c"><b>'+esc(n)+'</b></td><td class="c">'+(v.ing||'-')+'</td><td class="r">'+(v.ingA?man(v.ingA):'-')+'</td><td class="c">'+(v.pipe||'-')+'</td><td class="c">'+(v.newQ||'-')+'</td></tr>').join('') + '</table>'
+        : '<div class="wk-none">해당 없음</div>')
+     + '</div></div>';
+
+  h += '<div class="wk-h">⑦ 회의 결정사항 · 지시사항</div><div class="wk-memo">(회의 중 수기 기록)</div>';
+  el.innerHTML = h;
+}
+
+function printWeekly(){
+  const btn = [...document.querySelectorAll('.nav-btn')].find(b=>(b.getAttribute('onclick')||'').indexOf("'weekly'")>=0);
+  if(btn) showSection('weekly', btn);
+  renderWeekly();
+  setTimeout(()=>window.print(), 200);
+}
+
+function copyWeekly(){
+  const D = weeklyData(), R = D.R, k = D.kpi, C = D.chk;
+  const md = d => d ? d.slice(5).replace('-','.') : '-';
+  const L = [];
+  L.push('[주간회의] 사업현황 '+md(R.S)+'~'+md(R.E));
+  L.push('');
+  L.push('■ 영업: 신규견적 '+k.newQn+'건'+(k.newQa?'('+man(k.newQa)+')':'')+' / 파이프라인 '+k.pipeN+'건 / 누적 수주율 '+k.winRate+'%');
+  L.push('■ 계약: 금주 신규 '+k.newPn+'건'+(k.newPa?'('+man(k.newPa)+')':''));
+  D.newP.slice(0,8).forEach(p=>L.push('  - '+p.id+' '+p.name+' ['+(p.salesOwner||'미지정')+']'));
+  L.push('■ 진행공사 '+k.ingN+'건'+(k.ingA?' · '+man(k.ingA)+'원':''));
+  L.push('■ 관리필요');
+  if(C.overdue.length) L.push('  - 준공일 경과 '+C.overdue.length+'건: '+C.overdue.slice(0,5).map(p=>p.name).join(', '));
+  if(C.dueSoon.length) L.push('  - 7일내 준공 '+C.dueSoon.length+'건: '+C.dueSoon.slice(0,5).map(p=>p.name+'('+md(p.end)+')').join(', '));
+  if(C.lowMg.length)   L.push('  - 이익률 10%미만 '+C.lowMg.length+'건');
+  if(C.noAmt.length)   L.push('  - 계약금액 미입력 '+C.noAmt.length+'건');
+  if(C.noOwner.length) L.push('  - 견적자/최종계약자 미지정 '+C.noOwner.length+'건');
+  if(C.staleQ.length)  L.push('  - 30일 이상 정체 견적 '+C.staleQ.length+'건 (상태 정리 요청)');
+  if(!(C.overdue.length||C.dueSoon.length||C.lowMg.length||C.noAmt.length||C.noOwner.length||C.staleQ.length)) L.push('  - 특이사항 없음');
+  L.push('');
+  L.push('상세: https://lexankorea-eng.github.io/Korepolymer-PMTool/ (주간회의 탭)');
+  const text = L.join('\n');
+  const done = ()=>alert('카톡 요약이 복사됐습니다.\n단톡방에 붙여넣기(Ctrl+V) 하세요.');
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(done).catch(()=>fallbackCopy(text,done));
+  } else fallbackCopy(text,done);
+}
+function fallbackCopy(text, done){
+  const ta = document.createElement('textarea'); ta.value = text;
+  ta.style.position='fixed'; ta.style.opacity='0';
+  document.body.appendChild(ta); ta.select();
+  try{ document.execCommand('copy'); done(); }catch(e){ prompt('아래 내용을 복사하세요 (Ctrl+C)', text); }
+  document.body.removeChild(ta);
 }
 
 // ════════════════════════════════════════════════════════
@@ -1274,17 +1603,28 @@ function openModal(type, editId){
         <div class="form-row"><label>견적자 <span style="color:#A32D2D">*</span></label>
           <input id="f_qowner2" list="staffList" value="${e?(e.quoteOwner||''):''}" placeholder="견적 작성자"></div>
         <div class="form-row"><label>최종계약자 (책임 영업자) <span style="color:#A32D2D">*</span></label>
-          <input id="f_sowner" list="staffList" value="${e?(e.salesOwner||ME):ME}" placeholder="계약 책임자"></div>
+          <input id="f_sowner" list="staffList" value="${e?(e.salesOwner||''):ME}" placeholder="직접 선택 (자동입력 안 됨)"></div>
       </div>
       <div class="form-grid">
         <div class="form-row"><label>조달 계약방식</label><select id="f_ptype">
           <option value="" ${!e||!e.procureType?'selected':''}>해당없음 (민간)</option>
           <option value="수의계약" ${e&&e.procureType==='수의계약'?'selected':''}>수의계약</option>
           <option value="낙찰" ${e&&e.procureType==='낙찰'?'selected':''}>낙찰</option>
+          <option value="MAS" ${e&&e.procureType==='MAS'?'selected':''}>MAS (다수공급자계약)</option>
         </select></div>
         <div class="form-row"><label>입찰공고번호 (낙찰 시)</label><input id="f_bidno" value="${e?(e.bidNo||''):''}" placeholder="R26BK..."></div>
       </div>
       <div class="form-row"><label>발주기관 담당자</label><input id="f_ccontact" value="${e?(e.clientContact||''):''}" placeholder="수요기관 계약담당자"></div>
+      <div class="form-grid">
+        <div class="form-row"><label>계약일자</label><input id="f_cdate" type="date" value="${e?(e.contractDate||''):new Date().toISOString().slice(0,10)}"></div>
+        <div class="form-row"><label>면허·작업구분</label><input id="f_work" value="${e?(e.workType||''):''}" placeholder="예: 금속창호, 도장공사, 물품"></div>
+      </div>
+      <div class="form-grid">
+        <div class="form-row"><label>계산서 발행 누계 (원)</label><input id="f_billed" type="number" value="${e&&e.billed!=null?e.billed:''}" placeholder="발행한 합계"></div>
+        <div class="form-row"><label>최근 계산서 발행일</label><input id="f_idate" type="date" value="${e?(e.invoiceDate||''):''}"></div>
+      </div>
+      <div class="form-row"><label>계산서 발행 내역</label><input id="f_imemo" value="${e?(e.invoiceMemo||''):''}" placeholder="예: 2026.02.23 123,000,000(선금) / 2026.06.30 287,000,000"></div>
+      <div class="form-row"><label>비고</label><input id="f_pnote" value="${e?(e.note||''):''}" placeholder="공동수급·원도급사·변경계약 등"></div>
       <datalist id="staffList">${STAFF.map(s=>'<option value="'+s+'">').join('')}</datalist>
       <div class="form-grid">
         <div class="form-row"><label>착공일</label><input id="f_start" type="date" value="${e?e.start:''}"></div>
@@ -1418,7 +1758,13 @@ function saveProj(editId){
     status:document.getElementById('f_status').value,
     procureType:document.getElementById('f_ptype').value,
     bidNo:document.getElementById('f_bidno').value.trim(),
-    clientContact:document.getElementById('f_ccontact').value.trim()};
+    clientContact:document.getElementById('f_ccontact').value.trim(),
+    contractDate:document.getElementById('f_cdate').value,
+    workType:document.getElementById('f_work').value.trim(),
+    billed:document.getElementById('f_billed').value===''?null:Number(document.getElementById('f_billed').value),
+    invoiceDate:document.getElementById('f_idate').value,
+    invoiceMemo:document.getElementById('f_imemo').value.trim(),
+    note:document.getElementById('f_pnote').value.trim()};
   let data=load(K.proj);
   if(editId) data=data.map(x=>x.id===editId?{...x,...obj}:x);   // 견적연계 등 기존 필드 보존
   else{if(data.find(x=>x.id===id)){alert('이미 존재하는 코드입니다.');return;}data.push(obj);}
