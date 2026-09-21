@@ -147,20 +147,7 @@ tr.yr24:hover td{background:#FFF9D0}
 .lock-btn{width:100%;padding:11px;background:#1B3A5C;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit}
 .lock-btn:hover{background:#153051}
 .lock-err{font-size:11px;color:#A32D2D;margin-top:8px;min-height:16px}
-/* ── 동기화 UI ─────────────────── */
-.sync-bar{display:flex;align-items:center;gap:8px;background:#EAF3DE;border-radius:8px;padding:7px 12px;margin-bottom:12px;font-size:11px}
-.sync-dot{width:8px;height:8px;border-radius:50%;background:#639922;flex-shrink:0}
-.sync-dot.off{background:#CBD5E1}
-.sync-dot.syncing{background:#BA7517;animation:pulse .8s infinite}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
-.sync-status{flex:1;color:#3B6D11;font-weight:500}
-.sync-status.off{color:#94A3B8}
-.sync-status.err{color:#A32D2D}
-.sync-time{font-size:10px;color:#64748B}
-.gs-setup{background:#fff;border:1px solid #CBD5E1;border-radius:10px;padding:16px;margin-bottom:14px}
-.gs-setup-title{font-size:12px;font-weight:700;color:#1B3A5C;margin-bottom:10px}
-.gs-input-row{display:flex;gap:6px;margin-bottom:8px}
-.gs-input-row input{flex:1;padding:7px 10px;border:1px solid #CBD5E1;border-radius:6px;font-size:11px;font-family:inherit}
+/* ── 동기화 UI ─────────────────── */50%{opacity:.3}}
 
 /* ── 견적 상태 배지 ─────────────────── */
 .badge-quoting{background:#E8F4FD;color:#1B5E9C}
@@ -260,9 +247,6 @@ tr.yr24:hover td{background:#FFF9D0}
   <span style="color:var(--text2)">접속 중:</span>
   <div class="presence" id="presenceList"></div>
 </div>
-  <span class="sync-status off" id="syncStatus">Google Sheets 미연동 — ⚙ 연동설정을 눌러 설정하세요</span>
-  <span class="sync-time" id="syncTime"></span>
-</div>
 <!-- ── NAV ────────────────────────────── -->
 <div class="nav">
   <button class="nav-btn active" onclick="showSection('dashboard',this)">🏠 대시보드</button>
@@ -276,6 +260,9 @@ tr.yr24:hover td{background:#FFF9D0}
 
 <!-- ══════════════ 대시보드 ══════════════ -->
 <div id="sec-dashboard" class="section active">
+  <div style="font-size:12px;font-weight:700;color:var(--navy);margin-bottom:8px">■ 영업 파이프라인 (견적 단계)</div>
+  <div class="pipe-grid" id="dashPipeline"></div>
+  <div style="font-size:12px;font-weight:700;color:var(--navy);margin:16px 0 8px">■ 공사 실행 현황</div>
   <div class="metric-grid" id="dashMetrics"></div>
   <div class="card">
     <div class="card-header">
